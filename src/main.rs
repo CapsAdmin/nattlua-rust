@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use core::cmp::Reverse;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -18,12 +19,34 @@ macro_rules! hashmap(
      };
 );
 
+#[derive(Clone)]
+pub enum TokenType {
+    AnalyzerDebugCode,
+    ParserDebugCode,
+    Letter,
+    String,
+    Number,
+    Symbol,
+    EndOfFile, // whitespace
+    Shebang,   // whitespace
+    Discard,
+    Unknown,
+
+    // whitespace
+    LineComment,
+    MultilineComment,
+    CommentEscape,
+    Space,
+}
+
+#[derive(Clone)]
 struct Token {
-    type_: String,
+    kind: TokenType,
     value: String,
     is_whitespace: bool,
     start: usize,
     stop: usize,
+    pub whitespace: Vec<Token>,
 }
 
 struct BinaryOperatorInfo {
@@ -31,7 +54,7 @@ struct BinaryOperatorInfo {
     right_priority: i32,
 }
 
-struct BaseSyntax {
+struct Syntax {
     symbols: Vec<String>,
     lookup: HashMap<String, Vec<String>>,
     binary_operator_info: HashMap<String, BinaryOperatorInfo>,
@@ -57,7 +80,7 @@ struct BaseSyntax {
     prefix_operator_function_translate: HashMap<String, String>,
 }
 
-impl BaseSyntax {
+impl Syntax {
     fn add_symbols(symbols: &mut Vec<String>, strings: &Vec<String>) {
         let re = Regex::new(r"[^\p{L}\d\s@#]").unwrap();
 
@@ -119,6 +142,30 @@ impl BaseSyntax {
 
     fn is_primary_binary_operator(&self, token: &Token) -> bool {
         self.primary_binary_operators_lookup.contains(&token.value)
+    }
+
+    fn is_prefix_operator(&self, token: &Token) -> bool {
+        self.prefix_operators_lookup.contains(&token.value)
+    }
+
+    fn is_postfix_operator(&self, token: &Token) -> bool {
+        self.postfix_operators_lookup.contains(&token.value)
+    }
+
+    fn is_keyword(&self, token: &Token) -> bool {
+        self.keyword_lookup.contains(&token.value)
+    }
+
+    fn is_non_standard_keyword(&self, token: &Token) -> bool {
+        self.non_standard_keyword_lookup.contains(&token.value)
+    }
+
+    fn is_keyword_value(&self, token: &Token) -> bool {
+        self.keyword_values_lookup.contains(&token.value)
+    }
+
+    fn get_operator_info(&self, token: &Token) -> &BinaryOperatorInfo {
+        self.binary_operator_info.get(&token.value).unwrap()
     }
 
     pub fn build(&mut self) {
@@ -241,8 +288,8 @@ impl BaseSyntax {
     }
 }
 
-fn lua_syntax() -> BaseSyntax {
-    BaseSyntax {
+fn lua_syntax() -> Syntax {
+    Syntax {
         symbols: string_vec![],
         lookup: HashMap::new(),
         binary_operator_info: HashMap::new(),
@@ -304,8 +351,397 @@ fn lua_syntax() -> BaseSyntax {
     }
 }
 
-fn main() {
+fn lua_typesystem_syntax() -> Syntax {
     let mut syntax = lua_syntax();
-    syntax.build();
-    println!("syntax: {}", syntax.symbols[0])
+
+    syntax.prefix_operators = string_vec![
+        "-",
+        "#",
+        "not",
+        "~",
+        "typeof",
+        "$",
+        "unique",
+        "mutable",
+        "literal",
+        "supertype",
+        "expand"
+    ];
+
+    syntax.primary_binary_operators = string_vec!["."];
+
+    syntax.binary_operators = vec![
+        string_vec!["or"],
+        string_vec!["and"],
+        string_vec!["extends"],
+        string_vec!["subsetof"],
+        string_vec!["supersetof"],
+        string_vec!["<", ">", "<=", ">=", "~=", "=="],
+        string_vec!["|"],
+        string_vec!["~"],
+        string_vec!["&"],
+        string_vec!["<<", ">>"],
+        string_vec!["R.."],
+        string_vec!["+", "-"],
+        string_vec!["*", "/", "/idiv/", "%"],
+        string_vec!["R^"],
+    ];
+
+    syntax
+}
+
+struct Code {
+    buffer: String,
+    name: String,
+}
+
+impl Code {
+    fn new(code: String, name: String) -> Code {
+        Code {
+            buffer: code,
+            name: name.to_string(),
+        }
+    }
+
+    fn substring(&self, begin: usize, end: usize) -> String {
+        // TODO: string view?
+
+        let start = std::cmp::min(begin, self.get_length());
+        let stop = std::cmp::min(end, self.get_length());
+
+        self.buffer[start..stop].to_string()
+    }
+
+    fn get_string(&self) -> String {
+        self.buffer.to_string()
+    }
+
+    fn get_length(&self) -> usize {
+        self.buffer.len()
+    }
+
+    fn get_byte(&self, pos: usize) -> u8 {
+        *self.buffer.as_bytes().get(pos).or(Some(&0u8)).unwrap()
+    }
+
+    fn find_nearest(&self, input: &str, find: &str, from_index: usize) -> usize {
+        self.buffer[from_index..]
+            .find(find)
+            .unwrap_or_else(|| input.len())
+    }
+}
+
+struct Lexer {
+    code: Code,
+    position: usize,
+    runtime_syntax: Syntax,
+    typesystem_syntax: Syntax,
+}
+
+impl Lexer {
+    fn get_length(&self) -> usize {
+        self.code.get_length()
+    }
+
+    fn get_string(&self, start: usize, end: usize) -> String {
+        self.code.substring(start, end)
+    }
+
+    fn get_byte_char_offset(&self, offset: usize) -> u8 {
+        self.code.get_byte(self.position + offset)
+    }
+
+    fn get_current_char(&self) -> char {
+        self.get_byte_char_offset(0) as char
+    }
+
+    fn set_position(&mut self, position: usize) -> &mut Self {
+        self.position = position;
+        self
+    }
+
+    fn get_position(&self) -> usize {
+        self.position
+    }
+
+    fn reset_state(&mut self) -> &mut Self {
+        self.set_position(0);
+        self
+    }
+
+    fn find_nearest(&self, str: &str, from: usize) -> usize {
+        self.code.find_nearest(str, str, from)
+    }
+
+    fn advance(&mut self, offset: usize) -> &mut Self {
+        self.set_position(self.get_position() + offset);
+        self
+    }
+
+    fn read_char(&mut self) -> char {
+        let char = self.get_current_char();
+        self.advance(1);
+        char
+    }
+    fn the_end(&self) -> bool {
+        self.get_position() >= self.get_length()
+    }
+
+    fn is_byte(&self, byte: u8, offset: usize) -> bool {
+        self.get_byte_char_offset(offset) == byte
+    }
+
+    fn is_current_byte(&self, byte: u8) -> bool {
+        self.is_byte(byte, 0)
+    }
+
+    fn is_current_value(&self, value: &str) -> bool {
+        self.get_string(0, value.len()) == value
+    }
+
+    fn error(&self, message: String, start: Option<usize>, stop: Option<usize>, args: Vec<String>) {
+        let mut buffer = String::new();
+        buffer.push_str("Error: ");
+        buffer.push_str(message.as_str());
+        buffer.push_str("\n");
+        buffer.push_str("    ");
+        buffer.push_str(self.code.get_string().as_str());
+        buffer.push_str("\n");
+        buffer.push_str("    ");
+        if let Some(start) = start {
+            for _ in 0..start {
+                buffer.push_str(" ");
+            }
+            buffer.push_str("^");
+        }
+        buffer.push_str("\n");
+        if let Some(stop) = stop {
+            buffer.push_str("    ");
+            for _ in 0..stop {
+                buffer.push_str(" ");
+            }
+            buffer.push_str("^");
+        }
+        for arg in args {
+            buffer.push_str("\n");
+            buffer.push_str("    ");
+            buffer.push_str(arg.as_str());
+        }
+        println!("{}", buffer);
+    }
+
+    fn new_token(kind: TokenType, is_whitespace: bool, start: usize, stop: usize) -> Token {
+        Token {
+            kind,
+            is_whitespace,
+            start,
+            stop,
+            value: String::new(),
+            whitespace: Vec::new(),
+        }
+    }
+
+    fn read_from_array(&mut self, array: Vec<String>) -> bool {
+        for annotation in array {
+            if self
+                .get_string(self.get_position(), self.get_position() + annotation.len())
+                .to_lowercase()
+                == annotation.clone()
+            {
+                self.advance(annotation.len());
+                return true;
+            }
+        }
+        false
+    }
+
+    fn read_shebang(&mut self) -> bool {
+        if self.get_position() == 0 && self.is_current_value("#") {
+            while !self.the_end() {
+                self.advance(1);
+
+                if self.is_current_value("\n") {
+                    break;
+                }
+            }
+            return true;
+        }
+        false
+    }
+
+    fn read_end_of_file(&mut self) -> bool {
+        if self.the_end() {
+            self.advance(1);
+            return true;
+        }
+        false
+    }
+
+    fn read_unknown(&mut self) -> (Option<TokenType>, bool) {
+        self.advance(1);
+        (Some(TokenType::Unknown), false)
+    }
+
+    fn read(&mut self) -> (Option<TokenType>, bool) {
+        {
+            let kind = self.read_space();
+            if kind.is_some() {
+                return (kind, true);
+            }
+        }
+
+        {
+            let kind = self.read_letter().or_else(|| self.read_symbol());
+            if kind.is_some() {
+                return (kind, false);
+            }
+        }
+
+        (None, false)
+    }
+
+    fn read_simple(&mut self) -> (TokenType, bool, usize, usize) {
+        if self.read_shebang() {
+            return (TokenType::Shebang, false, 0, self.get_position());
+        }
+
+        let start = self.get_position();
+
+        {
+            let (kind, is_whitespace) = self.read();
+
+            if kind.is_some() {
+                return (kind.unwrap(), is_whitespace, start, self.get_position());
+            }
+        }
+
+        if self.read_end_of_file() {
+            return (TokenType::EndOfFile, false, start, self.get_position());
+        }
+
+        let (kind, is_whitespace) = self.read_unknown();
+
+        assert!(kind.is_some());
+
+        (kind.unwrap(), is_whitespace, start, self.get_position())
+    }
+
+    fn read_token(&mut self) -> Token {
+        let (token_type, is_whitespace, start, stop) = self.read_simple();
+        Self::new_token(token_type, is_whitespace, start, stop)
+    }
+
+    fn get_tokens(&mut self) -> Vec<Token> {
+        self.reset_state();
+
+        let mut tokens: Vec<Token> = Vec::new();
+
+        // read all tokens
+        loop {
+            let token = self.read_token();
+            tokens.push(token.clone());
+            if matches!(token.kind, TokenType::EndOfFile) {
+                break;
+            }
+        }
+
+        // fill the value of each token
+        for token in &mut tokens {
+            token.value = self.get_string(token.start, token.stop);
+        }
+
+        // sort the tokens into whitespace and non-whitespace
+        let mut whitespace_buffer: Vec<Token> = Vec::new();
+        let mut none_whitespace: Vec<Token> = Vec::new();
+
+        for token in &mut tokens {
+            if matches!(token.kind, TokenType::Discard) {
+                continue;
+            }
+
+            if token.is_whitespace {
+                whitespace_buffer.push(token.clone());
+            } else {
+                token.whitespace = whitespace_buffer.clone();
+                none_whitespace.push(token.clone());
+                whitespace_buffer.clear();
+            }
+        }
+
+        tokens = none_whitespace;
+
+        if !tokens.is_empty() {
+            let last = tokens.last_mut().unwrap();
+            last.value = "".to_string();
+        }
+
+        tokens
+    }
+
+    fn read_space(&mut self) -> Option<TokenType> {
+        if Syntax::is_space(self.get_current_char()) {
+            while !self.the_end() {
+                self.advance(1);
+                if !Syntax::is_space(self.get_current_char()) {
+                    break;
+                }
+            }
+            return Some(TokenType::Space);
+        }
+        None
+    }
+    fn read_letter(&mut self) -> Option<TokenType> {
+        if Syntax::is_letter(self.get_current_char()) {
+            while !self.the_end() {
+                self.advance(1);
+                if !Syntax::is_during_letter(self.get_current_char()) {
+                    break;
+                }
+            }
+
+            return Some(TokenType::Letter);
+        }
+        None
+    }
+
+    fn read_symbol(&mut self) -> Option<TokenType> {
+        if self.read_from_array(self.runtime_syntax.symbols.clone()) {
+            return Some(TokenType::Symbol);
+        }
+
+        if self.read_from_array(self.typesystem_syntax.symbols.clone()) {
+            return Some(TokenType::Symbol);
+        }
+
+        None
+    }
+}
+
+fn main() {
+    let code = Code {
+        buffer: "local   foo = 1".to_string(),
+        name: "test".to_string(),
+    };
+
+    let mut runtime_syntax = lua_syntax();
+    runtime_syntax.build();
+
+    let mut typesystem_syntax = lua_syntax();
+    typesystem_syntax.build();
+
+    let mut lexer = Lexer {
+        code,
+        position: 0,
+        runtime_syntax,
+        typesystem_syntax,
+    };
+
+    let tokens = lexer.get_tokens();
+
+    for token in &tokens {
+        for wtoken in &token.whitespace {
+            print!("{}", wtoken.value);
+        }
+        print!("{}", token.value);
+    }
 }
