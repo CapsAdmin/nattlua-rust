@@ -987,8 +987,85 @@ impl Lexer {
         }
     }
 
-    //fn read_decimal_number()
-}
+    fn read_decimal_number(&mut self) {
+        let mut dot = false;
+
+        while !self.the_end() {
+            if self.is_current_value("_") {
+                self.advance(1);
+            }
+
+            if self.is_current_value(".") {
+                if self.is_value(".", 1) {
+                    return;
+                }
+                if dot {
+                    return;
+                }
+
+                dot = true;
+
+                self.advance(1);
+            }
+
+            if self.read_number_annotations(AnnotationType::Decimal) {
+                break;
+            }
+
+            if Syntax::is_number(self.get_current_char()) {
+                self.advance(1);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn read_number(&mut self) -> Option<TokenType> {
+        if Syntax::is_number(self.get_current_char()) || (self.is_current_value(".") && Syntax::is_number(self.get_char_at(1))) {
+            if self.is_value("x", 1) || self.is_value("X", 1) {
+                self.read_hex_numebr()
+            } else if self.is_value("b", 1) || self.is_value("B", 1) {
+                self.read_binary_number()
+            } else {
+                self.read_decimal_number()
+            }
+
+            return Some(TokenType::Number);
+        }
+
+        None
+    }
+
+    fn read_multiline_string(&mut self) -> Option<TokenType> {
+        if self.is_value("[", 0) && (self.is_value("[", 1) || self.is_value("=", 1)) {
+          let start = self.get_position();
+          self.advance(1);
+
+          if self.is_current_value("=") {
+              while !self.the_end() {
+                  self.advance(1);
+                  if !self.is_current_value("=") {
+                      break;
+                  }
+              }
+          }
+
+          if !self.is_current_value("=") {
+                self.error(
+                    "malformed multiline string, expected =",
+                    Some(start),
+                    Some(self.get_position()),
+                    None,
+                );
+                return None;
+          }
+
+            self.advance(1);
+            
+let eq = ("=").repeat(self.get_position() - start - 4);
+        }
+    }
+ }
 
 fn main() {
     let code = Code {
