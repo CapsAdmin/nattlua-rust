@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 use core::cmp::Reverse;
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Binary,
+};
 
 macro_rules! string_vec {
     ($($x:expr),*) => (vec![$($x.to_string()),*]);
@@ -18,6 +21,12 @@ macro_rules! hashmap(
         }
      };
 );
+
+pub enum AnnotationType {
+    Hex,
+    Decimal,
+    Binary,
+}
 
 #[derive(Clone)]
 pub enum TokenType {
@@ -136,7 +145,7 @@ impl Syntax {
                 || (c >= '{' && c <= '~'))
     }
 
-    fn is_valid_hex(self, c: char) -> bool {
+    fn is_valid_hex(&self, c: char) -> bool {
         self.hex_map.contains(&c.to_string())
     }
 
@@ -424,10 +433,8 @@ impl Code {
         *self.buffer.as_bytes().get(pos).or(Some(&0u8)).unwrap()
     }
 
-    fn find_nearest(&self, input: &str, find: &str, from_index: usize) -> usize {
-        self.buffer[from_index..]
-            .find(find)
-            .unwrap_or_else(|| input.len())
+    fn find_nearest(&self, input: &str, find: &str, from_index: usize) -> Option<usize> {
+        self.buffer[from_index..].find(find)
     }
 }
 
@@ -436,6 +443,7 @@ struct Lexer {
     position: usize,
     runtime_syntax: Syntax,
     typesystem_syntax: Syntax,
+    comment_escape: bool,
 }
 
 impl Lexer {
@@ -469,8 +477,8 @@ impl Lexer {
         self
     }
 
-    fn find_nearest(&self, str: &str, from: usize) -> usize {
-        self.code.find_nearest(str, str, from)
+    fn find_nearest(&self, str: &str) -> Option<usize> {
+        self.code.find_nearest(str, str, self.get_position())
     }
 
     fn advance(&mut self, offset: usize) -> &mut Self {
@@ -496,13 +504,23 @@ impl Lexer {
     }
 
     fn is_current_value(&self, value: &str) -> bool {
+        self.is_value(value, 0)
+    }
+
+    fn is_value(&self, value: &str, offset: usize) -> bool {
         self.get_string(0, value.len()) == value
     }
 
-    fn error(&self, message: String, start: Option<usize>, stop: Option<usize>, args: Vec<String>) {
+    fn error(
+        &self,
+        message: &str,
+        start: Option<usize>,
+        stop: Option<usize>,
+        args: Option<Vec<String>>,
+    ) {
         let mut buffer = String::new();
         buffer.push_str("Error: ");
-        buffer.push_str(message.as_str());
+        buffer.push_str(message);
         buffer.push_str("\n");
         buffer.push_str("    ");
         buffer.push_str(self.code.get_string().as_str());
@@ -522,10 +540,13 @@ impl Lexer {
             }
             buffer.push_str("^");
         }
-        for arg in args {
-            buffer.push_str("\n");
-            buffer.push_str("    ");
-            buffer.push_str(arg.as_str());
+
+        if args.is_some() {
+            for arg in args.unwrap() {
+                buffer.push_str("\n");
+                buffer.push_str("    ");
+                buffer.push_str(arg.as_str());
+            }
         }
         println!("{}", buffer);
     }
@@ -705,21 +726,273 @@ impl Lexer {
     }
 
     fn read_symbol(&mut self) -> Option<TokenType> {
+        // TODO: avoid clone
         if self.read_from_array(self.runtime_syntax.symbols.clone()) {
             return Some(TokenType::Symbol);
         }
 
+        // TODO: avoid clone
         if self.read_from_array(self.typesystem_syntax.symbols.clone()) {
             return Some(TokenType::Symbol);
+        }
+        None
+    }
+
+    fn read_comment_escape(&mut self) -> Option<TokenType> {
+        if self.is_value("-", 0)
+            && self.is_value("-", 1)
+            && self.is_value("[", 2)
+            && self.is_value("[", 3)
+            && self.is_value("#", 4)
+        {
+            self.advance(5);
+            self.comment_escape = true;
+            return Some(TokenType::CommentEscape);
         }
 
         None
     }
+
+    fn read_remaining_comment_escape(&mut self) -> Option<TokenType> {
+        if self.comment_escape && self.is_value("]", 0) && self.is_value("]", 1) {
+            self.advance(2);
+            self.comment_escape = false;
+            return Some(TokenType::CommentEscape);
+        }
+
+        None
+    }
+
+    fn read_multiline_c_comment(&mut self) -> Option<TokenType> {
+        if self.is_value("/", 0) && self.is_value("*", 1) {
+            self.advance(2);
+            while !self.the_end() {
+                if self.is_current_value("\n") {
+                    break;
+                }
+                self.advance(1);
+            }
+            return Some(TokenType::MultilineComment);
+        }
+
+        None
+    }
+
+    fn read_line_comment(&mut self) -> Option<TokenType> {
+        if self.is_value("-", 0) && self.is_value("-", 1) {
+            self.advance(2);
+            while !self.the_end() {
+                if self.is_current_value("\n") {
+                    break;
+                }
+                self.advance(1);
+            }
+            return Some(TokenType::LineComment);
+        }
+
+        None
+    }
+
+    fn read_multiline_comment(&mut self) -> Option<TokenType> {
+        if self.is_value("-", 0)
+            && self.is_value("-", 1)
+            && self.is_value("[", 2)
+            && (self.is_value("[", 3) || self.is_value("=", 3))
+        {
+            let start = self.get_position();
+            self.advance(3);
+
+            while self.is_current_value("=") {
+                self.advance(1);
+            }
+
+            if !self.is_current_value("[") {
+                self.set_position(start);
+                return None;
+            }
+
+            self.advance(1);
+            let eq = ("=").repeat(self.get_position() - start - 4);
+            let pos = self.find_nearest(("]".to_string() + &eq + "]").as_str());
+
+            if pos.is_some() {
+                self.set_position(pos.unwrap());
+                return Some(TokenType::MultilineComment);
+            }
+
+            self.error(
+                "unclosed multiline comment",
+                Some(start),
+                Some(start + 1),
+                None,
+            );
+            self.set_position(start + 2);
+        }
+
+        return None;
+    }
+
+    fn read_analyzer_debug_code(&mut self) -> Option<TokenType> {
+        if self.is_value("§", 0) {
+            self.advance(2);
+            while !self.the_end() {
+                if self.is_current_value("\n") {
+                    break;
+                }
+                self.advance(1);
+            }
+            return Some(TokenType::AnalyzerDebugCode);
+        }
+
+        None
+    }
+
+    fn read_parser_debug_code(&mut self) -> Option<TokenType> {
+        if self.is_value("£", 0) {
+            self.advance(2);
+            while !self.the_end() {
+                if self.is_current_value("\n") {
+                    break;
+                }
+                self.advance(1);
+            }
+            return Some(TokenType::ParserDebugCode);
+        }
+
+        None
+    }
+
+    fn read_number_pow_exponent(&mut self, what: &str) -> bool {
+        self.advance(1);
+
+        if self.is_current_value("+") || self.is_current_value("-") {
+            self.advance(1);
+
+            if !Syntax::is_number(self.get_current_char()) {
+                self.error(
+                    format!(
+                        "malformed {} expected number, got {}",
+                        what,
+                        self.get_current_char()
+                    )
+                    .as_str(),
+                    Some(self.get_position() - 2),
+                    Some(self.get_position() - 1),
+                    None,
+                );
+            }
+
+            while !self.the_end() {
+                if !Syntax::is_number(self.get_current_char()) {
+                    break;
+                }
+                self.advance(1);
+            }
+        }
+
+        true
+    }
+
+    fn read_number_annotations(&mut self, what: AnnotationType) -> bool {
+        match what {
+            Hex => {
+                if self.is_current_value("p") && self.is_current_value("P") {
+                    return self.read_number_pow_exponent("pow");
+                }
+            }
+            Decimal => {
+                if self.is_current_value("e") && self.is_current_value("E") {
+                    return self.read_number_pow_exponent("exponent");
+                }
+            }
+        }
+
+        // TODO: what about typesystem number annotations?
+        // TODO: avoid clone
+        self.read_from_array(self.runtime_syntax.number_annotations.clone())
+    }
+
+    fn read_hex_numebr(&mut self) {
+        self.advance(2);
+        let mut dot = false;
+
+        while !self.the_end() {
+            if self.is_current_value("_") {
+                self.advance(1);
+            }
+
+            if self.is_current_value(".") {
+                if dot {
+                    self.error(
+                        "malformed hex number, got more than one dot",
+                        Some(self.get_position() - 1),
+                        Some(self.get_position()),
+                        None,
+                    );
+                }
+                dot = true;
+                self.advance(1);
+            }
+
+            if self.read_number_annotations(AnnotationType::Hex) {
+                break;
+            }
+
+            if self.runtime_syntax.is_valid_hex(self.get_current_char()) {
+                self.advance(1);
+            } else if Syntax::is_space(self.get_current_char())
+                || Syntax::is_symbol(self.get_current_char())
+            {
+                break;
+            } else {
+                self.error(
+                    format!(
+                        "malformed hex number {} in hex notation",
+                        self.get_current_char()
+                    )
+                    .as_str(),
+                    Some(self.get_position() - 1),
+                    Some(self.get_position()),
+                    None,
+                );
+            }
+        }
+    }
+
+    fn read_binary_number(&mut self) {
+        self.advance(2);
+
+        while !self.the_end() {
+            if self.is_current_value("_") {
+                self.advance(1);
+            }
+
+            if (self.is_current_value("1") || self.is_current_value("0")) {
+                self.advance(1);
+            } else if Syntax::is_space(self.get_current_char()) {
+                break;
+            } else {
+                self.error(
+                    "malformed binary number, expected 0 or 1",
+                    Some(self.get_position() - 1),
+                    Some(self.get_position()),
+                    None,
+                );
+                break;
+            }
+
+            if self.read_number_annotations(AnnotationType::Binary) {
+                break;
+            }
+        }
+    }
+
+    //fn read_decimal_number()
 }
 
 fn main() {
     let code = Code {
-        buffer: "local   foo = 1".to_string(),
+        buffer: "local   foo = 1 == 2 .. 3(...)".to_string(),
         name: "test".to_string(),
     };
 
@@ -734,6 +1007,7 @@ fn main() {
         position: 0,
         runtime_syntax,
         typesystem_syntax,
+        comment_escape: false,
     };
 
     let tokens = lexer.get_tokens();
