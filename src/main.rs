@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use core::cmp::Reverse;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -34,26 +33,36 @@ pub enum TokenType {
     String,
     Number,
     Symbol,
-    EndOfFile, // whitespace
-    Shebang,   // whitespace
+    EndOfFile, // sort of whitespace
+    Shebang,   // sort of whitespace
     Discard,
     Unknown,
 
-    // whitespace
     LineComment,
     MultilineComment,
     CommentEscape,
     Space,
 }
 
+impl TokenType {
+    pub fn is_whitespace(&self) -> bool {
+        match self {
+            TokenType::LineComment
+            | TokenType::MultilineComment
+            | TokenType::CommentEscape
+            | TokenType::Space => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Token {
     kind: TokenType,
     value: String,
-    is_whitespace: bool,
     start: usize,
     stop: usize,
-    pub whitespace: Vec<Token>,
+    whitespace: Vec<Token>,
 }
 
 struct BinaryOperatorInfo {
@@ -547,10 +556,9 @@ impl Lexer {
         println!("{}", buffer);
     }
 
-    fn new_token(kind: TokenType, is_whitespace: bool, start: usize, stop: usize) -> Token {
+    fn new_token(kind: TokenType, start: usize, stop: usize) -> Token {
         Token {
             kind,
-            is_whitespace,
             start,
             stop,
             value: String::new(),
@@ -586,77 +594,79 @@ impl Lexer {
         false
     }
 
-    fn read_end_of_file(&mut self) -> bool {
-        if self.the_end() {
-            self.advance(1);
-            return true;
-        }
-        false
+    fn read_whitespace(&mut self) -> Option<TokenType> {
+        self.read_space()
+            .or_else(|| self.read_comment_escape())
+            .or_else(|| self.read_multiline_c_comment())
+            .or_else(|| self.read_line_c_comment())
+            .or_else(|| self.read_multiline_comment())
+            .or_else(|| self.read_line_comment())
     }
 
-    fn read_unknown(&mut self) -> (Option<TokenType>, bool) {
-        self.advance(1);
-        (Some(TokenType::Unknown), false)
+    fn read_non_whitespace(&mut self) -> Option<TokenType> {
+        self.read_analyzer_debug_code()
+            .or_else(|| self.read_parser_debug_code())
+            .or_else(|| self.read_number())
+            .or_else(|| self.read_multiline_string())
+            .or_else(|| self.read_single_quoted_string())
+            .or_else(|| self.read_double_quoted_string())
+            .or_else(|| self.read_letter())
+            .or_else(|| self.read_symbol())
     }
 
-    fn read(&mut self) -> (Option<TokenType>, bool) {
-        {
-            let kind = self
-                .read_space()
-                .or_else(|| self.read_comment_escape())
-                .or_else(|| self.read_multiline_c_comment())
-                .or_else(|| self.read_line_c_comment())
-                .or_else(|| self.read_multiline_comment())
-                .or_else(|| self.read_line_comment());
-
-            if kind.is_some() {
-                return (kind, true);
-            }
-        }
-
-        {
-            let kind = self
-                .read_analyzer_debug_code()
-                .or_else(|| self.read_parser_debug_code())
-                .or_else(|| self.read_number())
-                .or_else(|| self.read_multiline_string())
-                .or_else(|| self.read_single_quoted_string())
-                .or_else(|| self.read_double_quoted_string())
-                .or_else(|| self.read_letter())
-                .or_else(|| self.read_symbol());
-            if kind.is_some() {
-                return (kind, false);
-            }
-        }
-
-        (None, false)
-    }
-
-    fn read_simple(&mut self) -> (TokenType, bool, usize, usize) {
+    fn read_single_token(&mut self) -> Token {
         if self.read_shebang() {
-            return (TokenType::Shebang, false, 0, self.get_position());
+            return Self::new_token(TokenType::Shebang, 0, self.get_position());
+        }
+
+        if self.read_remaining_comment_escape().is_some() {
+            return Self::new_token(
+                TokenType::Discard,
+                self.get_position() - 1,
+                self.get_position(),
+            );
         }
 
         let start = self.get_position();
 
-        if let (Some(kind), is_whitespace) = self.read() {
-            return (kind, is_whitespace, start, self.get_position());
+        if let Some(kind) = self.read_whitespace() {
+            return Self::new_token(kind, start, self.get_position());
         }
 
-        if self.read_end_of_file() {
-            return (TokenType::EndOfFile, false, start, self.get_position());
+        if let Some(kind) = self.read_non_whitespace() {
+            return Self::new_token(kind, start, self.get_position());
         }
 
-        let (kind, is_whitespace) = self.read_unknown();
+        if self.the_end() {
+            self.advance(1);
+            return Self::new_token(TokenType::EndOfFile, start, self.get_position());
+        }
 
-        assert!(kind.is_some());
+        self.advance(1);
 
-        (kind.unwrap(), is_whitespace, start, self.get_position())
+        Self::new_token(TokenType::Unknown, start, self.get_position())
     }
 
-    fn read_token(&mut self) -> Token {
-        let (token_type, is_whitespace, start, stop) = self.read_simple();
-        Self::new_token(token_type, is_whitespace, start, stop)
+    fn read_token(&mut self) -> Option<Token> {
+        let mut whitespace_tokens: Vec<Token> = Vec::new();
+
+        loop {
+            let mut token = self.read_single_token();
+
+            if token.kind.is_whitespace() {
+                whitespace_tokens.push(token);
+            } else {
+                for tk in &mut whitespace_tokens {
+                    tk.value = self.get_string(tk.start, tk.stop);
+                }
+                token.value = self.get_string(token.start, token.stop);
+                token.whitespace = whitespace_tokens.clone();
+                whitespace_tokens.clear();
+                return Some(token);
+            }
+        }
+
+        None
     }
 
     fn get_tokens(&mut self) -> Vec<Token> {
@@ -664,43 +674,14 @@ impl Lexer {
 
         let mut tokens: Vec<Token> = Vec::new();
 
-        // read all tokens
         loop {
-            let token = self.read_token();
-            tokens.push(token.clone());
-            if token.kind == TokenType::EndOfFile {
-                break;
+            if let Some(token) = self.read_token() {
+                tokens.push(token.clone());
+
+                if token.kind == TokenType::EndOfFile {
+                    break;
+                }
             }
-        }
-
-        // fill buffer.push_str("\n")the value of each token
-        for token in &mut tokens {
-            token.value = self.get_string(token.start, token.stop);
-        }
-
-        // sort the tokens into whitespace and non-whitespace
-        let mut whitespace_buffer: Vec<Token> = Vec::new();
-        let mut none_whitespace: Vec<Token> = Vec::new();
-
-        for token in &mut tokens {
-            if token.kind == TokenType::Discard {
-                continue;
-            }
-
-            if token.is_whitespace {
-                whitespace_buffer.push(token.clone());
-            } else {
-                token.whitespace = whitespace_buffer.clone();
-                none_whitespace.push(token.clone());
-                whitespace_buffer.clear();
-            }
-        }
-
-        tokens = none_whitespace;
-
-        if !tokens.is_empty() {
-            let last = tokens.last_mut().unwrap();
-            last.value = "".to_string();
         }
 
         tokens
@@ -1212,6 +1193,30 @@ fn one_token(tokens: Vec<Token>) -> Token {
     assert_eq!(tokens[1].kind, TokenType::EndOfFile);
 
     tokens[0].clone()
+}
+
+fn tokens_to_string(tokens: Vec<Token>) -> String {
+    let mut result = String::new();
+
+    for token in &tokens {
+        for wtoken in &token.whitespace {
+            result.push_str(&wtoken.value);
+        }
+        result.push_str(&token.value);
+    }
+
+    result
+}
+
+fn check(code: &str) {
+    let actual = tokens_to_string(tokenize(code.to_string()));
+
+    assert_eq!(actual, code);
+}
+
+#[test]
+fn tokens_to_string_test() {
+    check("local foo =   5 + 2..2");
 }
 
 #[test]
