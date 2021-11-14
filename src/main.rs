@@ -1,10 +1,7 @@
 #![allow(dead_code)]
 use core::cmp::Reverse;
 use regex::Regex;
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Binary,
-};
+use std::collections::{HashMap, HashSet};
 
 macro_rules! string_vec {
     ($($x:expr),*) => (vec![$($x.to_string()),*]);
@@ -59,8 +56,8 @@ struct Token {
 }
 
 struct BinaryOperatorInfo {
-    left_priority: i32,
-    right_priority: i32,
+    left_priority: usize,
+    right_priority: usize,
 }
 
 struct Syntax {
@@ -90,7 +87,7 @@ struct Syntax {
 }
 
 impl Syntax {
-    fn add_symbols(symbols: &mut Vec<String>, strings: &Vec<String>) {
+    fn add_symbols(symbols: &mut Vec<String>, strings: &[String]) {
         let re = Regex::new(r"[^\p{L}\d\s@#]").unwrap();
 
         for symbol in strings {
@@ -100,11 +97,11 @@ impl Syntax {
         }
     }
 
-    fn add_binary_symbols(symbols: &mut Vec<String>, strings: &Vec<Vec<String>>) {
+    fn add_binary_symbols(symbols: &mut Vec<String>, strings: &[Vec<String>]) {
         for string_vec in strings {
             for string in string_vec {
-                if string.starts_with("R") {
-                    symbols.push(string[1..].to_string());
+                if let Some(stripped) = string.strip_prefix('R') {
+                    symbols.push(stripped.to_string());
                 } else {
                     symbols.push(string.to_string());
                 }
@@ -113,24 +110,24 @@ impl Syntax {
     }
 
     fn is_letter(c: char) -> bool {
-        (c >= 'a' && c <= 'z')
-            || (c >= 'A' && c <= 'Z')
+        ('a'..='z').contains(&c)
+            || ('A'..='Z').contains(&c)
             || c == '_'
             || c == '@'
             || c >= 127u8 as char
     }
 
     fn is_during_letter(c: char) -> bool {
-        (c >= 'a' && c <= 'z')
-            || (c >= '0' && c <= '9')
-            || (c >= 'A' && c <= 'Z')
+        ('a'..='z').contains(&c)
+            || ('0'..='9').contains(&c)
+            || ('A'..='Z').contains(&c)
             || c == '_'
             || c == '@'
             || c >= 127u8 as char
     }
 
     fn is_number(c: char) -> bool {
-        c >= '0' && c <= '9'
+        ('0'..='9').contains(&c)
     }
 
     fn is_space(c: char) -> bool {
@@ -139,10 +136,10 @@ impl Syntax {
 
     fn is_symbol(c: char) -> bool {
         c != '_'
-            && ((c >= '!' && c <= '/')
-                || (c >= ':' && c <= '?')
-                || (c >= '[' && c <= '`')
-                || (c >= '{' && c <= '~'))
+            && (('!'..='/').contains(&c)
+                || (':'..='?').contains(&c)
+                || ('['..='`').contains(&c)
+                || ('{'..='~').contains(&c))
     }
 
     fn is_valid_hex(&self, c: char) -> bool {
@@ -193,11 +190,11 @@ impl Syntax {
         {
             let re = Regex::new(r"(.*)A(.*)B(.*)").unwrap();
             for (key, val) in &self.binary_operator_function_translate {
-                let caps = re.captures(&val).unwrap();
+                let caps = re.captures(val).unwrap();
 
-                let mut left = caps.get(1).map_or("", |m| m.as_str()).to_string();
+                let left = caps.get(1).map_or("", |m| m.as_str()).to_string();
                 let mid = caps.get(2).map_or("", |m| m.as_str()).to_string();
-                let mut right = caps.get(3).map_or("", |m| m.as_str()).to_string();
+                let right = caps.get(3).map_or("", |m| m.as_str()).to_string();
 
                 self.lookup.insert(
                     key.to_string(),
@@ -209,10 +206,10 @@ impl Syntax {
         {
             let re = Regex::new(r"(.*)A(.*)").unwrap();
             for (key, val) in &self.prefix_operator_function_translate {
-                let caps = re.captures(&val).unwrap();
+                let caps = re.captures(val).unwrap();
 
-                let mut left = caps.get(1).map_or("", |m| m.as_str()).to_string();
-                let mut right = caps.get(2).map_or("", |m| m.as_str()).to_string();
+                let left = caps.get(1).map_or("", |m| m.as_str()).to_string();
+                let right = caps.get(2).map_or("", |m| m.as_str()).to_string();
 
                 self.lookup.insert(
                     key.to_string(),
@@ -224,10 +221,10 @@ impl Syntax {
         {
             let re = Regex::new(r"(.*)A(.*)").unwrap();
             for (key, val) in &self.postfix_operator_function_translate {
-                let caps = re.captures(&val).unwrap();
+                let caps = re.captures(val).unwrap();
 
-                let mut left = caps.get(1).map_or("", |m| m.as_str()).to_string();
-                let mut right = caps.get(2).map_or("", |m| m.as_str()).to_string();
+                let left = caps.get(1).map_or("", |m| m.as_str()).to_string();
+                let right = caps.get(2).map_or("", |m| m.as_str()).to_string();
 
                 self.lookup.insert(
                     key.to_string(),
@@ -237,13 +234,11 @@ impl Syntax {
         }
 
         {
-            let mut priority = 0;
-
-            for group in &self.binary_operators {
+            for (priority, group) in self.binary_operators.iter().enumerate() {
                 for token in group {
-                    if token.starts_with("R") {
+                    if let Some(stripped) = token.strip_prefix('R') {
                         self.binary_operator_info.insert(
-                            token[1..].to_string(),
+                            stripped.to_string(),
                             BinaryOperatorInfo {
                                 left_priority: priority + 1,
                                 right_priority: priority,
@@ -259,8 +254,6 @@ impl Syntax {
                         );
                     }
                 }
-
-                priority = priority + 1;
             }
         }
 
@@ -405,11 +398,8 @@ struct Code {
 }
 
 impl Code {
-    fn new(code: String, name: String) -> Code {
-        Code {
-            buffer: code,
-            name: name.to_string(),
-        }
+    fn new(buffer: String, name: String) -> Code {
+        Code { buffer, name }
     }
 
     fn substring(&self, begin: usize, end: usize) -> String {
@@ -421,8 +411,8 @@ impl Code {
         self.buffer[start..stop].to_string()
     }
 
-    fn get_string(&self) -> String {
-        self.buffer.to_string()
+    fn get_string(&self) -> &String {
+        &self.buffer
     }
 
     fn get_length(&self) -> usize {
@@ -433,7 +423,7 @@ impl Code {
         *self.buffer.as_bytes().get(pos).or(Some(&0u8)).unwrap()
     }
 
-    fn find_nearest(&self, input: &str, find: &str, from_index: usize) -> Option<usize> {
+    fn find_nearest(&self, find: &str, from_index: usize) -> Option<usize> {
         self.buffer[from_index..].find(find)
     }
 }
@@ -451,8 +441,8 @@ impl Lexer {
         self.code.get_length()
     }
 
-    fn get_string(&self, start: usize, end: usize) -> String {
-        self.code.substring(start, end)
+    fn get_string(&self, start: usize, stop: usize) -> String {
+        self.code.substring(start, stop)
     }
 
     fn get_byte_char_offset(&self, offset: usize) -> u8 {
@@ -478,7 +468,7 @@ impl Lexer {
     }
 
     fn find_nearest(&self, str: &str) -> Option<usize> {
-        self.code.find_nearest(str, str, self.get_position())
+        self.code.find_nearest(str, self.get_position())
     }
 
     fn advance(&mut self, offset: usize) -> &mut Self {
@@ -508,7 +498,10 @@ impl Lexer {
     }
 
     fn is_value(&self, value: &str, offset: usize) -> bool {
-        self.get_string(0, value.len()) == value
+        self.get_string(
+            self.get_position() + offset,
+            self.get_position() + offset + value.len(),
+        ) == value
     }
 
     fn error(
@@ -605,14 +598,29 @@ impl Lexer {
 
     fn read(&mut self) -> (Option<TokenType>, bool) {
         {
-            let kind = self.read_space();
+            let kind = self
+                .read_space()
+                .or(self.read_comment_escape())
+                .or(self.read_multiline_c_comment())
+                .or(self.read_line_c_comment())
+                .or(self.read_multiline_comment())
+                .or(self.read_line_comment());
+
             if kind.is_some() {
                 return (kind, true);
             }
         }
 
         {
-            let kind = self.read_letter().or_else(|| self.read_symbol());
+            let kind = self
+                .read_analyzer_debug_code()
+                .or(self.read_parser_debug_code())
+                .or(self.read_number())
+                .or(self.read_multiline_string())
+                .or(self.read_single_quoted_string())
+                .or(self.read_double_quoted_string())
+                .or(self.read_letter())
+                .or(self.read_symbol());
             if kind.is_some() {
                 return (kind, false);
             }
@@ -628,12 +636,8 @@ impl Lexer {
 
         let start = self.get_position();
 
-        {
-            let (kind, is_whitespace) = self.read();
-
-            if kind.is_some() {
-                return (kind.unwrap(), is_whitespace, start, self.get_position());
-            }
+        if let (Some(kind), is_whitespace) = self.read() {
+            return (kind, is_whitespace, start, self.get_position());
         }
 
         if self.read_end_of_file() {
@@ -792,6 +796,20 @@ impl Lexer {
 
         None
     }
+    fn read_line_c_comment(&mut self) -> Option<TokenType> {
+        if self.is_value("/", 0) && self.is_value("/", 1) {
+            self.advance(2);
+            while !self.the_end() {
+                if self.is_current_value("\n") {
+                    break;
+                }
+                self.advance(1);
+            }
+            return Some(TokenType::LineComment);
+        }
+
+        None
+    }
 
     fn read_multiline_comment(&mut self) -> Option<TokenType> {
         if self.is_value("-", 0)
@@ -813,10 +831,9 @@ impl Lexer {
 
             self.advance(1);
             let eq = ("=").repeat(self.get_position() - start - 4);
-            let pos = self.find_nearest(("]".to_string() + &eq + "]").as_str());
 
-            if pos.is_some() {
-                self.set_position(pos.unwrap());
+            if let Some(pos) = self.find_nearest(("]".to_string() + &eq + "]").as_str()) {
+                self.set_position(pos);
                 return Some(TokenType::MultilineComment);
             }
 
@@ -829,7 +846,7 @@ impl Lexer {
             self.set_position(start + 2);
         }
 
-        return None;
+        None
     }
 
     fn read_analyzer_debug_code(&mut self) -> Option<TokenType> {
@@ -895,16 +912,17 @@ impl Lexer {
 
     fn read_number_annotations(&mut self, what: AnnotationType) -> bool {
         match what {
-            Hex => {
+            AnnotationType::Hex => {
                 if self.is_current_value("p") && self.is_current_value("P") {
                     return self.read_number_pow_exponent("pow");
                 }
             }
-            Decimal => {
+            AnnotationType::Decimal => {
                 if self.is_current_value("e") && self.is_current_value("E") {
                     return self.read_number_pow_exponent("exponent");
                 }
             }
+            AnnotationType::Binary => {}
         }
 
         // TODO: what about typesystem number annotations?
@@ -912,7 +930,7 @@ impl Lexer {
         self.read_from_array(self.runtime_syntax.number_annotations.clone())
     }
 
-    fn read_hex_numebr(&mut self) {
+    fn read_hex_number(&mut self) {
         self.advance(2);
         let mut dot = false;
 
@@ -967,7 +985,7 @@ impl Lexer {
                 self.advance(1);
             }
 
-            if (self.is_current_value("1") || self.is_current_value("0")) {
+            if self.is_current_value("1") || self.is_current_value("0") {
                 self.advance(1);
             } else if Syntax::is_space(self.get_current_char()) {
                 break;
@@ -1021,9 +1039,12 @@ impl Lexer {
     }
 
     fn read_number(&mut self) -> Option<TokenType> {
-        if Syntax::is_number(self.get_current_char()) || (self.is_current_value(".") && Syntax::is_number(self.get_char_at(1))) {
+        if Syntax::is_number(self.get_current_char())
+            || (self.is_current_value(".")
+                && Syntax::is_number(self.get_byte_char_offset(1) as char))
+        {
             if self.is_value("x", 1) || self.is_value("X", 1) {
-                self.read_hex_numebr()
+                self.read_hex_number()
             } else if self.is_value("b", 1) || self.is_value("B", 1) {
                 self.read_binary_number()
             } else {
@@ -1038,19 +1059,19 @@ impl Lexer {
 
     fn read_multiline_string(&mut self) -> Option<TokenType> {
         if self.is_value("[", 0) && (self.is_value("[", 1) || self.is_value("=", 1)) {
-          let start = self.get_position();
-          self.advance(1);
+            let start = self.get_position();
+            self.advance(1);
 
-          if self.is_current_value("=") {
-              while !self.the_end() {
-                  self.advance(1);
-                  if !self.is_current_value("=") {
-                      break;
-                  }
-              }
-          }
+            if self.is_current_value("=") {
+                while !self.the_end() {
+                    self.advance(1);
+                    if !self.is_current_value("=") {
+                        break;
+                    }
+                }
+            }
 
-          if !self.is_current_value("=") {
+            if !self.is_current_value("=") {
                 self.error(
                     "malformed multiline string, expected =",
                     Some(start),
@@ -1058,18 +1079,78 @@ impl Lexer {
                     None,
                 );
                 return None;
-          }
+            }
 
             self.advance(1);
-            
-let eq = ("=").repeat(self.get_position() - start - 4);
+
+            let closing = "]".to_string() + &("=").repeat(self.get_position() - start - 4) + "]";
+
+            if let Some(pos) = self.find_nearest(closing.as_str()) {
+                self.set_position(pos);
+                return Some(TokenType::MultilineComment);
+            }
+
+            self.error(
+                "expected multiline string reached end of code",
+                Some(start),
+                Some(self.get_position()),
+                None,
+            );
         }
+        None
     }
- }
+
+    fn read_quoted_string(&mut self, quote: char) -> Option<TokenType> {
+        if !self.is_current_byte(quote as u8) {
+            return None;
+        }
+
+        let start = self.get_position();
+        self.advance(1);
+
+        while !self.the_end() {
+            let char = self.read_char();
+
+            if char == '\\' {
+                let char = self.read_char();
+
+                if char == 'z' && !self.is_current_value(quote.to_string().as_str()) {
+                    self.read_space();
+                }
+            } else if char == '\n' {
+                self.set_position(start);
+                self.error(
+                    "expected quote to end",
+                    Some(start),
+                    Some(self.get_position() - 1),
+                    None,
+                );
+            } else if char == quote {
+                return Some(TokenType::String);
+            }
+        }
+
+        self.error(
+            "expected quote to end: reached end of file",
+            Some(start),
+            Some(self.get_position()),
+            None,
+        );
+        None
+    }
+
+    fn read_single_quoted_string(&mut self) -> Option<TokenType> {
+        self.read_quoted_string('\'')
+    }
+
+    fn read_double_quoted_string(&mut self) -> Option<TokenType> {
+        self.read_quoted_string('"')
+    }
+}
 
 fn main() {
     let code = Code {
-        buffer: "local   foo = 1 == 2 .. 3(...)".to_string(),
+        buffer: "5.6e3".to_string(),
         name: "test".to_string(),
     };
 
@@ -1095,4 +1176,76 @@ fn main() {
         }
         print!("{}", token.value);
     }
+}
+
+fn tokenize(code_string: String) -> Vec<Token> {
+    let code = Code {
+        buffer: code_string,
+        name: "test".to_string(),
+    };
+
+    let mut runtime_syntax = lua_syntax();
+    runtime_syntax.build();
+
+    let mut typesystem_syntax = lua_syntax();
+    typesystem_syntax.build();
+
+    let mut lexer = Lexer {
+        code,
+        position: 0,
+        runtime_syntax,
+        typesystem_syntax,
+        comment_escape: false,
+    };
+
+    lexer.get_tokens()
+}
+
+fn one_token(tokens: Vec<Token>) -> Token {
+    if tokens.len() != 2 {
+        panic!("expected 1 token, got {}", tokens.len());
+    }
+
+    assert!(matches!(tokens[1].kind, TokenType::EndOfFile));
+
+    tokens[0].clone()
+}
+
+#[test]
+fn unclosed_multiline_comment() {
+    assert!(matches!(
+        tokenize("".to_string())[0].kind,
+        TokenType::EndOfFile
+    ));
+
+    assert!(matches!(
+        one_token(tokenize("a".to_string())).kind,
+        TokenType::Letter
+    ));
+
+    assert!(matches!(
+        one_token(tokenize("1".to_string())).kind,
+        TokenType::Number
+    ));
+
+    assert!(matches!(
+        one_token(tokenize("(".to_string())).kind,
+        TokenType::Symbol
+    ));
+}
+
+#[test]
+fn shebang() {
+    assert!(matches!(
+        tokenize("#!/usr/bin/env lua".to_string())[0].kind,
+        TokenType::Shebang
+    ));
+}
+
+#[test]
+fn single_quote_string() {
+    assert!(matches!(
+        one_token(tokenize("'1'".to_string())).kind,
+        TokenType::String
+    ));
 }
