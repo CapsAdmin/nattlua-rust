@@ -19,13 +19,14 @@ macro_rules! hashmap(
      };
 );
 
+#[derive(Eq, PartialEq, Debug)]
 pub enum AnnotationType {
     Hex,
     Decimal,
     Binary,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum TokenType {
     AnalyzerDebugCode,
     ParserDebugCode,
@@ -498,10 +499,12 @@ impl Lexer {
     }
 
     fn is_value(&self, value: &str, offset: usize) -> bool {
-        self.get_string(
+        let l = self.get_string(
             self.get_position() + offset,
             self.get_position() + offset + value.len(),
-        ) == value
+        );
+
+        l == value
     }
 
     fn error(
@@ -600,11 +603,11 @@ impl Lexer {
         {
             let kind = self
                 .read_space()
-                .or(self.read_comment_escape())
-                .or(self.read_multiline_c_comment())
-                .or(self.read_line_c_comment())
-                .or(self.read_multiline_comment())
-                .or(self.read_line_comment());
+                .or_else(|| self.read_comment_escape())
+                .or_else(|| self.read_multiline_c_comment())
+                .or_else(|| self.read_line_c_comment())
+                .or_else(|| self.read_multiline_comment())
+                .or_else(|| self.read_line_comment());
 
             if kind.is_some() {
                 return (kind, true);
@@ -614,13 +617,13 @@ impl Lexer {
         {
             let kind = self
                 .read_analyzer_debug_code()
-                .or(self.read_parser_debug_code())
-                .or(self.read_number())
-                .or(self.read_multiline_string())
-                .or(self.read_single_quoted_string())
-                .or(self.read_double_quoted_string())
-                .or(self.read_letter())
-                .or(self.read_symbol());
+                .or_else(|| self.read_parser_debug_code())
+                .or_else(|| self.read_number())
+                .or_else(|| self.read_multiline_string())
+                .or_else(|| self.read_single_quoted_string())
+                .or_else(|| self.read_double_quoted_string())
+                .or_else(|| self.read_letter())
+                .or_else(|| self.read_symbol());
             if kind.is_some() {
                 return (kind, false);
             }
@@ -665,12 +668,12 @@ impl Lexer {
         loop {
             let token = self.read_token();
             tokens.push(token.clone());
-            if matches!(token.kind, TokenType::EndOfFile) {
+            if token.kind == TokenType::EndOfFile {
                 break;
             }
         }
 
-        // fill the value of each token
+        // fill buffer.push_str("\n")the value of each token
         for token in &mut tokens {
             token.value = self.get_string(token.start, token.stop);
         }
@@ -680,7 +683,7 @@ impl Lexer {
         let mut none_whitespace: Vec<Token> = Vec::new();
 
         for token in &mut tokens {
-            if matches!(token.kind, TokenType::Discard) {
+            if token.kind == TokenType::Discard {
                 continue;
             }
 
@@ -1206,46 +1209,53 @@ fn one_token(tokens: Vec<Token>) -> Token {
         panic!("expected 1 token, got {}", tokens.len());
     }
 
-    assert!(matches!(tokens[1].kind, TokenType::EndOfFile));
+    assert_eq!(tokens[1].kind, TokenType::EndOfFile);
 
     tokens[0].clone()
 }
 
 #[test]
 fn unclosed_multiline_comment() {
-    assert!(matches!(
-        tokenize("".to_string())[0].kind,
-        TokenType::EndOfFile
-    ));
-
-    assert!(matches!(
-        one_token(tokenize("a".to_string())).kind,
-        TokenType::Letter
-    ));
-
-    assert!(matches!(
-        one_token(tokenize("1".to_string())).kind,
-        TokenType::Number
-    ));
-
-    assert!(matches!(
-        one_token(tokenize("(".to_string())).kind,
-        TokenType::Symbol
-    ));
+    assert_eq!(tokenize("".to_string())[0].kind, TokenType::EndOfFile);
+    assert_eq!(one_token(tokenize("a".to_string())).kind, TokenType::Letter);
+    assert_eq!(one_token(tokenize("1".to_string())).kind, TokenType::Number);
+    assert_eq!(one_token(tokenize("(".to_string())).kind, TokenType::Symbol);
 }
 
 #[test]
 fn shebang() {
-    assert!(matches!(
+    assert_eq!(
         tokenize("#!/usr/bin/env lua".to_string())[0].kind,
         TokenType::Shebang
-    ));
+    );
 }
 
 #[test]
 fn single_quote_string() {
-    assert!(matches!(
+    assert_eq!(
         one_token(tokenize("'1'".to_string())).kind,
         TokenType::String
-    ));
+    );
+}
+
+#[test]
+fn z_escaped_string() {
+    assert_eq!(
+        one_token(tokenize("\"a\\z\na\"".to_string())).kind,
+        TokenType::String
+    );
+}
+
+#[test]
+fn number_range() {
+    assert_eq!(tokenize("1..20".to_string()).len(), 4);
+}
+
+#[test]
+fn number_annotations() {
+    assert_eq!(tokenize("50ull".to_string()).len(), 2);
+    assert_eq!(tokenize("50uLL".to_string()).len(), 2);
+    assert_eq!(tokenize("50ULL".to_string()).len(), 2);
+    assert_eq!(tokenize("50LL".to_string()).len(), 2);
+    assert_eq!(tokenize("50lL".to_string()).len(), 2);
 }
