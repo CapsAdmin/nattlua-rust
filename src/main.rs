@@ -48,10 +48,7 @@ pub enum TokenType {
 impl TokenType {
     pub fn is_whitespace(&self) -> bool {
         match self {
-            TokenType::LineComment
-            | TokenType::MultilineComment
-            | TokenType::CommentEscape
-            | TokenType::Space => true,
+            TokenType::LineComment | TokenType::MultilineComment | TokenType::CommentEscape | TokenType::Space => true,
             _ => false,
         }
     }
@@ -136,11 +133,7 @@ impl Syntax {
     }
 
     fn is_letter(c: char) -> bool {
-        ('a'..='z').contains(&c)
-            || ('A'..='Z').contains(&c)
-            || c == '_'
-            || c == '@'
-            || c >= 127u8 as char
+        ('a'..='z').contains(&c) || ('A'..='Z').contains(&c) || c == '_' || c == '@' || c >= 127u8 as char
     }
 
     fn is_during_letter(c: char) -> bool {
@@ -308,8 +301,8 @@ impl Syntax {
         }
 
         for key in [
-            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "A",
-            "B", "C", "D", "E", "F",
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "A", "B", "C", "D", "E",
+            "F",
         ] {
             self.hex_map.insert(key.to_string());
         }
@@ -329,14 +322,11 @@ fn lua_syntax() -> Syntax {
         non_standard_keyword_lookup: HashSet::new(),
         hex_map: HashSet::new(),
 
-        symbol_characters: string_vec![
-            ",", ";", "(", ")", "{", "}", "[", "]", "=", "::", '"', "'", "<|", "|>"
-        ],
+        symbol_characters: string_vec![",", ";", "(", ")", "{", "}", "[", "]", "=", "::", '"', "'", "<|", "|>"],
         number_annotations: string_vec!["ull", "ll", "ul", "i"],
         keywords: string_vec![
-            "do", "end", "if", "then", "else", "elseif", "for", "in", "while", "repeat", "until",
-            "break", "return", "local", "function", "and", "not", "or",
-            // these are just to make sure all code is covered by tests
+            "do", "end", "if", "then", "else", "elseif", "for", "in", "while", "repeat", "until", "break", "return",
+            "local", "function", "and", "not", "or", // these are just to make sure all code is covered by tests
             "ÆØÅ", "ÆØÅÆ"
         ],
         non_standard_keywords: string_vec!["continue", "import", "literal", "mutable"],
@@ -524,21 +514,12 @@ impl Lexer {
     }
 
     fn is_value(&self, value: &str, offset: usize) -> bool {
-        let l = self.get_string(
-            self.get_position() + offset,
-            self.get_position() + offset + value.len(),
-        );
+        let l = self.get_string(self.get_position() + offset, self.get_position() + offset + value.len());
 
         l == value
     }
 
-    fn error(
-        &self,
-        message: &str,
-        start: Option<usize>,
-        stop: Option<usize>,
-        args: Option<Vec<String>>,
-    ) {
+    fn error(&self, message: &str, start: Option<usize>, stop: Option<usize>, args: Option<Vec<String>>) {
         let mut buffer = String::new();
         buffer.push_str("Error: ");
         buffer.push_str(message);
@@ -596,7 +577,7 @@ impl Lexer {
         false
     }
 
-    fn read_whitespace(&mut self) -> Result<Option<TokenType>> {
+    fn read_whitespace(&mut self) -> Result<Option<TokenType>, LexerError> {
         self.read_space()
             .or_else(|| self.read_comment_escape())
             .or_else(|| self.read_multiline_c_comment())
@@ -605,9 +586,9 @@ impl Lexer {
             .or_else(|| self.read_line_comment())
     }
 
-    fn read_non_whitespace(&mut self) -> Result<Option<TokenType>> {
+    fn read_non_whitespace(&mut self) -> Result<Option<TokenType>, LexerError> {
         self.read_analyzer_debug_code()
-            .or_else(|| self.read_parser_debug_code())
+            .or_else(|e| self.read_parser_debug_code())
             .or_else(|| self.read_number())
             .or_else(|| self.read_multiline_string())
             .or_else(|| self.read_single_quoted_string())
@@ -622,11 +603,7 @@ impl Lexer {
         }
 
         if let Some(kind) = self.read_remaining_comment_escape().ok().unwrap() {
-            return Self::new_token(
-                TokenType::Discard,
-                self.get_position() - 1,
-                self.get_position(),
-            );
+            return Self::new_token(TokenType::Discard, self.get_position() - 1, self.get_position());
         }
 
         let start = self.get_position();
@@ -786,8 +763,7 @@ impl Lexer {
             }
 
             return Err(LexerError {
-                message: "tried to find end of multiline c comment, reached end of code"
-                    .to_string(),
+                message: "tried to find end of multiline c comment, reached end of code".to_string(),
                 start,
                 stop: self.get_position(),
             });
@@ -864,7 +840,7 @@ impl Lexer {
         Ok(None)
     }
 
-    fn read_analyzer_debug_code(&mut self) -> Option<TokenType> {
+    fn read_analyzer_debug_code(&mut self) -> Result<Option<TokenType>, LexerError> {
         if self.is_value("§", 0) {
             self.advance(2);
             while !self.the_end() {
@@ -873,10 +849,10 @@ impl Lexer {
                 }
                 self.advance(1);
             }
-            return Some(TokenType::AnalyzerDebugCode);
+            return Ok(Some(TokenType::AnalyzerDebugCode));
         }
 
-        None
+        Ok(None)
     }
 
     fn read_parser_debug_code(&mut self) -> Result<Option<TokenType>, LexerError> {
@@ -894,106 +870,82 @@ impl Lexer {
         Ok(None)
     }
 
-    fn read_number_pow_exponent(&mut self, what: &str) -> bool {
+    fn read_number_exponent(&mut self, what: &str) -> Result<bool, LexerError> {
+        // skip the 'e', 'E', 'p' or 'P'
         self.advance(1);
 
         if self.is_current_value("+") || self.is_current_value("-") {
             self.advance(1);
+        } else {
+            return Err(LexerError {
+                message: format!("expected '+' or '-' after '{}'", what),
+                start: self.get_position() - 1,
+                stop: self.get_position(),
+            });
+        }
 
+        if !Syntax::is_number(self.get_current_char()) {
+            return Err(LexerError {
+                message: format!("malformed {} expected number, got {}", what, self.get_current_char()).as_str(),
+                start: self.get_position() - 2,
+                stop: self.get_position() - 1,
+            });
+        }
+
+        while !self.the_end() {
             if !Syntax::is_number(self.get_current_char()) {
-                self.error(
-                    format!(
-                        "malformed {} expected number, got {}",
-                        what,
-                        self.get_current_char()
-                    )
-                    .as_str(),
-                    Some(self.get_position() - 2),
-                    Some(self.get_position() - 1),
-                    None,
-                );
+                break;
             }
 
-            while !self.the_end() {
-                if !Syntax::is_number(self.get_current_char()) {
-                    break;
-                }
-                self.advance(1);
-            }
+            self.advance(1);
         }
 
-        true
-    }
-
-    fn read_number_annotations(&mut self, what: AnnotationType) -> bool {
-        match what {
-            AnnotationType::Hex => {
-                if self.is_current_value("p") && self.is_current_value("P") {
-                    return self.read_number_pow_exponent("pow");
-                }
-            }
-            AnnotationType::Decimal => {
-                if self.is_current_value("e") && self.is_current_value("E") {
-                    return self.read_number_pow_exponent("exponent");
-                }
-            }
-            AnnotationType::Binary => {}
-        }
-
-        // TODO: what about typesystem number annotations?
-        // TODO: avoid clone
-        self.read_from_array(self.runtime_syntax.number_annotations.clone())
+        return Ok(true);
     }
 
     fn read_hex_number(&mut self) -> Result<Option<TokenType>, LexerError> {
+        // 0xABCDEF_1234567890.100p+10
+
         if self.is_value("0", 0) && (self.is_value("x", 1) || self.is_value("X", 1)) {
+            // skip past 0x
             self.advance(2);
-            let mut dot = false;
 
             while !self.the_end() {
                 if self.is_current_value("_") {
                     self.advance(1);
                 }
 
-                if self.is_current_value(".") {
-                    if dot {
-                        return Err(LexerError {
-                            message: "malformed hex number, found more than one dot",
-                            start: self.get_position() - 1,
-                            stop: self.get_position(),
-                        });
-                    }
-                    dot = true;
+                if self.is_current_value(".") && !self.is_value(".", 1) {
                     self.advance(1);
                 }
 
                 if self.runtime_syntax.is_valid_hex(self.get_current_char()) {
                     self.advance(1);
                 } else {
-                    if Syntax::is_space(self.get_current_char())
-                        || Syntax::is_symbol(self.get_current_char())
+                    if Syntax::is_space(self.get_current_char()) || Syntax::is_symbol(self.get_current_char()) {
+                        break;
+                    }
+
+                    if self.is_current_value("p")
+                        && self.is_current_value("P")
+                        && self.read_number_exponent("pow").is_ok()
                     {
                         break;
                     }
 
-                    if self.read_number_annotations(AnnotationType::Hex) {
-                        break;
-                    }
-
                     return Err(LexerError {
-                        message: format!(
-                            "malformed hex number {} in hex notation",
-                            self.get_current_char()
-                        )
-                        .as_str(),
+                        message: format!("malformed hex number {} in hex notation", self.get_current_char()).as_str(),
                         start: self.get_position() - 1,
                         stop: self.get_position(),
                     });
                 }
             }
 
+            self.read_from_array(self.runtime_syntax.number_annotations.clone());
+
             return Ok(Some(TokenType::Number));
         }
+
         Ok(None)
     }
 
@@ -1010,13 +962,11 @@ impl Lexer {
                 if self.is_current_value("1") || self.is_current_value("0") {
                     self.advance(1);
                 } else {
-                    if Syntax::is_space(
-                        self.get_current_char() || Syntax::is_symbol(self.get_current_char()),
-                    ) {
+                    if Syntax::is_space(self.get_current_char() || Syntax::is_symbol(self.get_current_char())) {
                         break;
                     }
 
-                    if self.read_number_annotations(AnnotationType::Binary) {
+                    if self.read_from_array(self.runtime_syntax.number_annotations.clone()) {
                         break;
                     }
 
@@ -1036,8 +986,7 @@ impl Lexer {
 
     fn read_decimal_number(&mut self) -> Result<Option<TokenType>, LexerError> {
         if Syntax::is_number(self.get_current_char())
-            || (self.is_current_value(".")
-                && Syntax::is_number(self.get_byte_char_offset(1) as char))
+            || (self.is_current_value(".") && Syntax::is_number(self.get_byte_char_offset(1) as char))
         {
             let mut dot = false;
 
@@ -1050,18 +999,15 @@ impl Lexer {
                 if self.is_current_value("_") {
                     self.advance(1);
                 }
+
                 if Syntax::is_number(self.get_current_char()) {
                     self.advance(1);
                 } else {
-                    if Syntax::is_space(
-                        self.get_current_char() || Syntax::is_symbol(self.get_current_char()),
-                    ) {
+                    if Syntax::is_space(self.get_current_char() || Syntax::is_symbol(self.get_current_char())) {
                         break;
                     }
 
-                    if self.is_current_value("e")
-                        && self.is_current_value("E")
-                        && self.read_number_pow_exponent("exponent")
+                    if self.is_current_value("e") && self.is_current_value("E") && self.read_number_exponent("exponent")
                     {
                         break;
                     }
@@ -1081,8 +1027,7 @@ impl Lexer {
 
     fn read_number(&mut self) -> Result<Option<TokenType>, LexerError> {
         if Syntax::is_number(self.get_current_char())
-            || (self.is_current_value(".")
-                && Syntax::is_number(self.get_byte_char_offset(1) as char))
+            || (self.is_current_value(".") && Syntax::is_number(self.get_byte_char_offset(1) as char))
         {
             if self.is_value("x", 1) || self.is_value("X", 1) {
                 return self.read_hex_number();
@@ -1098,7 +1043,7 @@ impl Lexer {
         Ok(None)
     }
 
-    fn read_multiline_string(&mut self) -> Option<TokenType> {
+    fn read_multiline_string(&mut self) -> Result<Option<TokenType>, LexerError> {
         if self.is_value("[", 0) && (self.is_value("[", 1) || self.is_value("=", 1)) {
             let start = self.get_position();
             self.advance(1);
@@ -1113,13 +1058,11 @@ impl Lexer {
             }
 
             if !self.is_current_value("=") {
-                self.error(
-                    "malformed multiline string, expected =",
-                    Some(start),
-                    Some(self.get_position()),
-                    None,
-                );
-                return None;
+                return Err(LexerError {
+                    message: "malformed multiline string, expected =",
+                    start,
+                    stop: self.get_position(),
+                });
             }
 
             self.advance(1);
@@ -1131,19 +1074,18 @@ impl Lexer {
                 return Some(TokenType::MultilineComment);
             }
 
-            self.error(
-                "expected multiline string reached end of code",
-                Some(start),
-                Some(self.get_position()),
-                None,
-            );
+            return Err(LexerError {
+                message: "expected multiline string reached end of code",
+                start,
+                stop: self.get_position(),
+            });
         }
         None
     }
 
-    fn read_quoted_string(&mut self, quote: char) -> Option<TokenType> {
+    fn read_quoted_string(&mut self, quote: char) -> Result<Option<TokenType>, LexerError> {
         if !self.is_current_byte(quote as u8) {
-            return None;
+            return Ok(None);
         }
 
         let start = self.get_position();
@@ -1160,31 +1102,28 @@ impl Lexer {
                 }
             } else if char == '\n' {
                 self.set_position(start);
-                self.error(
-                    "expected quote to end",
-                    Some(start),
-                    Some(self.get_position() - 1),
-                    None,
-                );
+                return Err(LexerError {
+                    message: "expected quote to end",
+                    start,
+                    stop: self.get_position() - 1,
+                });
             } else if char == quote {
-                return Some(TokenType::String);
+                return Ok(Some(TokenType::String));
             }
         }
 
-        self.error(
-            "expected quote to end: reached end of file",
-            Some(start),
-            Some(self.get_position()),
-            None,
-        );
-        None
+        return Err(LexerError {
+            message: "expected quote to end: reached end of file",
+            start,
+            stop: self.get_position() - 1,
+        });
     }
 
-    fn read_single_quoted_string(&mut self) -> Option<TokenType> {
+    fn read_single_quoted_string(&mut self) -> Result<Option<TokenType>, LexerError> {
         self.read_quoted_string('\'')
     }
 
-    fn read_double_quoted_string(&mut self) -> Option<TokenType> {
+    fn read_double_quoted_string(&mut self) -> Result<Option<TokenType>, LexerError> {
         self.read_quoted_string('"')
     }
 }
@@ -1286,26 +1225,17 @@ fn unclosed_multiline_comment() {
 
 #[test]
 fn shebang() {
-    assert_eq!(
-        tokenize("#!/usr/bin/env lua".to_string())[0].kind,
-        TokenType::Shebang
-    );
+    assert_eq!(tokenize("#!/usr/bin/env lua".to_string())[0].kind, TokenType::Shebang);
 }
 
 #[test]
 fn single_quote_string() {
-    assert_eq!(
-        one_token(tokenize("'1'".to_string())).kind,
-        TokenType::String
-    );
+    assert_eq!(one_token(tokenize("'1'".to_string())).kind, TokenType::String);
 }
 
 #[test]
 fn z_escaped_string() {
-    assert_eq!(
-        one_token(tokenize("\"a\\z\na\"".to_string())).kind,
-        TokenType::String
-    );
+    assert_eq!(one_token(tokenize("\"a\\z\na\"".to_string())).kind, TokenType::String);
 }
 
 #[test]
