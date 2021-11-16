@@ -1349,6 +1349,7 @@ fn multiline_comment() {
 fn line_comment() {
     assert_eq!(tokenize("-- a")[0].kind, TokenType::EndOfFile);
     assert_eq!(tokenize("// a")[0].kind, TokenType::EndOfFile);
+    assert_eq!(tokenize("--[= a")[0].kind, TokenType::EndOfFile);
 }
 
 #[test]
