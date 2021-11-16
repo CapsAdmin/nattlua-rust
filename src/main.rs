@@ -575,204 +575,61 @@ impl Lexer {
     }
 
     fn read_whitespace(&mut self) -> Result<Option<TokenType>, LexerError> {
-        // TODO: chain errors, return the first error, but if the Option is None, continue
-        {
-            let res = self.read_space();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_comment_escape();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_multiline_c_comment();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_line_c_comment();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_multiline_comment();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_line_comment();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-
-        Ok(None)
+        self.read_space()
+            .transpose()
+            .or_else(|| self.read_comment_escape().transpose())
+            .or_else(|| self.read_multiline_c_comment().transpose())
+            .or_else(|| self.read_line_c_comment().transpose())
+            .or_else(|| self.read_multiline_comment().transpose())
+            .or_else(|| self.read_line_comment().transpose())
+            .transpose()
     }
 
     fn read_non_whitespace(&mut self) -> Result<Option<TokenType>, LexerError> {
-        // TODO: chain errors, return the first error, but if the Option is None, continue
-        {
-            let res = self.read_analyzer_debug_code();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_parser_debug_code();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_number();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_multiline_string();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_single_quoted_string();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_double_quoted_string();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_letter();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
-        {
-            let res = self.read_symbol();
-            if let Ok(val) = res {
-                if val.is_some() {
-                    return Ok(val);
-                }
-            } else {
-                return res;
-            }
-        }
+        self.read_analyzer_debug_code()
+            .transpose()
+            .or_else(|| self.read_parser_debug_code().transpose())
+            .or_else(|| self.read_number().transpose())
+            .or_else(|| self.read_multiline_string().transpose())
+            .or_else(|| self.read_single_quoted_string().transpose())
+            .or_else(|| self.read_double_quoted_string().transpose())
+            .or_else(|| self.read_letter().transpose())
+            .or_else(|| self.read_symbol().transpose())
+            .transpose()
+    }
 
+    fn read_unknown(&mut self) -> Result<Option<TokenType>, LexerError> {
+        self.advance(1);
+        Ok(Some(TokenType::Unknown))
+    }
+
+    fn read_the_end(&mut self) -> Result<Option<TokenType>, LexerError> {
+        if self.the_end() {
+            return Ok(Some(TokenType::EndOfFile));
+        }
         Ok(None)
     }
 
     fn read_single_token(&mut self) -> Result<Token, LexerError> {
         let start = self.get_position();
 
-        {
-            let res = self.read_shebang();
-            if let Err(err) = res {
-                return Err(err);
-            } else if let Ok(Some(kind)) = res {
-                return Ok(Self::new_token(kind, start, self.get_position()));
-            }
+        let res = self
+            .read_shebang()
+            .transpose()
+            .or_else(|| self.read_remaining_comment_escape().transpose())
+            .or_else(|| self.read_whitespace().transpose())
+            .or_else(|| self.read_non_whitespace().transpose())
+            .or_else(|| self.read_the_end().transpose())
+            .or_else(|| self.read_unknown().transpose())
+            .transpose();
+
+        if res.is_err() {
+            return Err(res.err().unwrap());
         }
 
-        {
-            let res = self.read_remaining_comment_escape();
-            if let Err(err) = res {
-                return Err(err);
-            } else if let Ok(Some(kind)) = res {
-                return Ok(Self::new_token(kind, start, self.get_position()));
-            }
-        }
+        let kind = res.unwrap().unwrap();
 
-        {
-            let res = self.read_whitespace();
-            if let Err(err) = res {
-                return Err(err);
-            } else if let Ok(Some(kind)) = res {
-                return Ok(Self::new_token(kind, start, self.get_position()));
-            }
-        }
-
-        {
-            let res = self.read_non_whitespace();
-            if let Err(err) = res {
-                return Err(err);
-            } else if let Ok(Some(kind)) = res {
-                return Ok(Self::new_token(kind, start, self.get_position()));
-            }
-        }
-
-        if self.the_end() {
-            self.advance(1);
-            return Ok(Self::new_token(TokenType::EndOfFile, start, self.get_position()));
-        }
-
-        self.advance(1);
-
-        Ok(Self::new_token(TokenType::Unknown, start, self.get_position()))
+        Ok(Self::new_token(kind, start, self.get_position()))
     }
 
     fn read_token(&mut self) -> Result<Token, LexerError> {
