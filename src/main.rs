@@ -1058,7 +1058,7 @@ impl Lexer {
                 }
             }
 
-            if !self.is_value("=", 0) {
+            if !self.is_value("[", 0) {
                 return Err(LexerError {
                     message: "malformed multiline string, expected =".to_string(),
                     start,
@@ -1068,10 +1068,12 @@ impl Lexer {
 
             self.advance(1);
 
-            let closing = "]".to_string() + &("=").repeat(self.get_position() - start - 4) + "]";
+            let pos = self.get_position();
 
-            if let Some(pos) = self.find_nearest(closing.as_str()) {
-                self.set_position(pos);
+            let closing = "]".to_string() + &("=").repeat(pos - start - 2) + "]";
+
+            if let Some(pos2) = self.find_nearest(closing.as_str()) {
+                self.set_position(pos + pos2 + closing.len() - 1);
                 return Ok(Some(TokenType::MultilineComment));
             }
 
@@ -1108,7 +1110,7 @@ impl Lexer {
                 return Err(LexerError {
                     message: "expected quote to end".to_string(),
                     start,
-                    stop: self.get_position() - 1,
+                    stop: self.get_position(),
                 });
             } else if char == quote {
                 return Ok(Some(TokenType::String));
@@ -1288,6 +1290,12 @@ fn z_escaped_string() {
 fn number_range() {
     assert_eq!(tokenize("1..20").len(), 4);
 }
+#[test]
+fn number_delimiter() {
+    assert_eq!(tokenize("1_000_000").len(), 2);
+    assert_eq!(tokenize("0xdead_beef").len(), 2);
+    assert_eq!(tokenize("0b0101_0101").len(), 2);
+}
 
 #[test]
 fn number_annotations() {
@@ -1310,4 +1318,20 @@ fn malformed_number() {
 fn multiline_comment_error() {
     expect_error("/*", "tried to find end of multiline c comment");
     expect_error("--[[", "unclosed multiline comment");
+}
+
+#[test]
+fn string_error() {
+    expect_error("\"woo\nfoo", "expected quote to end");
+    expect_error("'aaa", "expected quote to end: reached end of file");
+}
+
+#[test]
+fn multiline_string() {
+    assert_eq!(tokenize("a = [[a]]").len(), 4);
+    assert_eq!(tokenize("a = [=[a]=]").len(), 4);
+    assert_eq!(tokenize("a = [==[a]==]").len(), 4);
+
+    expect_error("a = [=a", "malformed multiline string");
+    expect_error("a = [[a", "expected multiline string reached end of code");
 }
