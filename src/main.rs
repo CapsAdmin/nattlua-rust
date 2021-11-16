@@ -1106,7 +1106,6 @@ impl Lexer {
                     }
                 }
             } else if char == '\n' {
-                self.set_position(start);
                 return Err(LexerError {
                     message: "expected quote to end".to_string(),
                     start,
