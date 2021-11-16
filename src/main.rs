@@ -578,92 +578,246 @@ impl Lexer {
     }
 
     fn read_whitespace(&mut self) -> Result<Option<TokenType>, LexerError> {
-        self.read_space()
-            .or_else(|| self.read_comment_escape())
-            .or_else(|| self.read_multiline_c_comment())
-            .or_else(|| self.read_line_c_comment())
-            .or_else(|| self.read_multiline_comment())
-            .or_else(|| self.read_line_comment())
+        // TODO: chain errors, return the first error, but if the Option is None, continue
+        {
+            let res = self.read_space();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_comment_escape();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_multiline_c_comment();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_line_c_comment();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_multiline_comment();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_line_comment();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+
+        Ok(None)
     }
 
     fn read_non_whitespace(&mut self) -> Result<Option<TokenType>, LexerError> {
-        self.read_analyzer_debug_code()
-            .or_else(|e| self.read_parser_debug_code())
-            .or_else(|| self.read_number())
-            .or_else(|| self.read_multiline_string())
-            .or_else(|| self.read_single_quoted_string())
-            .or_else(|| self.read_double_quoted_string())
-            .or_else(|| self.read_letter())
-            .or_else(|| self.read_symbol())
-    }
-
-    fn read_single_token(&mut self) -> Token {
-        if let Some(kind) = self.read_shebang().ok().unwrap() {
-            return Self::new_token(kind, 0, self.get_position());
+        // TODO: chain errors, return the first error, but if the Option is None, continue
+        {
+            let res = self.read_analyzer_debug_code();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_parser_debug_code();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_number();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_multiline_string();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_single_quoted_string();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_double_quoted_string();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_letter();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
+        }
+        {
+            let res = self.read_symbol();
+            if let Ok(val) = res {
+                if val.is_some() {
+                    return Ok(val);
+                }
+            } else {
+                return res;
+            }
         }
 
-        if let Some(kind) = self.read_remaining_comment_escape().ok().unwrap() {
-            return Self::new_token(TokenType::Discard, self.get_position() - 1, self.get_position());
+        Ok(None)
+    }
+
+    fn read_single_token(&mut self) -> Result<Token, LexerError> {
+        if let res = self.read_shebang() {
+            if res.is_err() {
+                return Err(res.unwrap_err());
+            } else if let Ok(Some(kind)) = res {
+                return Ok(Self::new_token(kind, 0, self.get_position()));
+            }
+        }
+
+        if let res = self.read_remaining_comment_escape() {
+            if res.is_err() {
+                return Err(res.unwrap_err());
+            } else if let Ok(Some(kind)) = res {
+                return Ok(Self::new_token(kind, self.get_position() - 1, self.get_position()));
+            }
         }
 
         let start = self.get_position();
 
-        if let Some(kind) = self.read_whitespace() {
-            return Self::new_token(kind, start, self.get_position());
+        if let res = self.read_whitespace() {
+            if res.is_err() {
+                return Err(res.unwrap_err());
+            } else if let Ok(Some(kind)) = res {
+                return Ok(Self::new_token(kind, start, self.get_position()));
+            }
         }
 
-        if let Some(kind) = self.read_non_whitespace() {
-            return Self::new_token(kind, start, self.get_position());
+        if let res = self.read_non_whitespace() {
+            if res.is_err() {
+                return Err(res.unwrap_err());
+            } else if let Ok(Some(kind)) = res {
+                return Ok(Self::new_token(kind, start, self.get_position()));
+            }
         }
 
         if self.the_end() {
             self.advance(1);
-            return Self::new_token(TokenType::EndOfFile, start, self.get_position());
+            return Ok(Self::new_token(TokenType::EndOfFile, start, self.get_position()));
         }
 
         self.advance(1);
 
-        Self::new_token(TokenType::Unknown, start, self.get_position())
+        Ok(Self::new_token(TokenType::Unknown, start, self.get_position()))
     }
 
-    fn read_token(&mut self) -> Option<Token> {
+    fn read_token(&mut self) -> Result<Token, LexerError> {
         let mut whitespace_tokens: Vec<Token> = Vec::new();
 
         loop {
-            let mut token = self.read_single_token();
+            let res = self.read_single_token();
 
-            if token.kind.is_whitespace() {
-                whitespace_tokens.push(token);
-            } else {
-                for tk in &mut whitespace_tokens {
-                    tk.value = self.get_string(tk.start, tk.stop);
+            if let Ok(mut token) = res {
+                if token.kind.is_whitespace() {
+                    whitespace_tokens.push(token);
+                } else {
+                    for tk in &mut whitespace_tokens {
+                        tk.value = self.get_string(tk.start, tk.stop);
+                    }
+                    token.value = self.get_string(token.start, token.stop);
+                    token.whitespace = whitespace_tokens.clone();
+                    whitespace_tokens.clear();
+                    return Ok(token);
                 }
-                token.value = self.get_string(token.start, token.stop);
-                token.whitespace = whitespace_tokens.clone();
-                whitespace_tokens.clear();
-                return Some(token);
+            } else {
+                return res;
             }
         }
-
-        None
     }
 
-    fn get_tokens(&mut self) -> Vec<Token> {
+    fn get_tokens(&mut self) -> (Vec<Token>, Vec<LexerError>) {
         self.reset_state();
 
         let mut tokens: Vec<Token> = Vec::new();
+        let mut errors: Vec<LexerError> = Vec::new();
 
         loop {
-            if let Some(token) = self.read_token() {
+            let res = self.read_token();
+            if let Ok(token) = res {
                 tokens.push(token.clone());
 
                 if token.kind == TokenType::EndOfFile {
                     break;
                 }
+            } else {
+                errors.push(res.err().unwrap());
             }
         }
 
-        tokens
+        (tokens, errors)
     }
 
     fn read_shebang(&mut self) -> Result<Option<TokenType>, LexerError> {
@@ -675,7 +829,7 @@ impl Lexer {
                     break;
                 }
             }
-            return Ok(Some(TokenType::EndOfFile));
+            return Ok(Some(TokenType::Shebang));
         }
 
         Ok(None)
@@ -732,10 +886,10 @@ impl Lexer {
         {
             self.advance(5);
             self.comment_escape = true;
-            return Some(TokenType::CommentEscape);
+            return Ok(Some(TokenType::CommentEscape));
         }
 
-        None
+        Ok(None)
     }
 
     fn read_remaining_comment_escape(&mut self) -> Result<Option<TokenType>, LexerError> {
@@ -786,7 +940,7 @@ impl Lexer {
 
         Ok(None)
     }
-    fn read_line_c_comment(&mut self) -> Option<TokenType> {
+    fn read_line_c_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
         if self.is_value("/", 0) && self.is_value("/", 1) {
             self.advance(2);
             while !self.the_end() {
@@ -795,10 +949,10 @@ impl Lexer {
                 }
                 self.advance(1);
             }
-            return Some(TokenType::LineComment);
+            return Ok(Some(TokenType::LineComment));
         }
 
-        None
+        Ok(None)
     }
 
     fn read_multiline_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
@@ -817,7 +971,7 @@ impl Lexer {
             // if we have an incomplete multiline comment, it's just a single line comment
             if !self.is_current_value("[") {
                 self.set_position(start);
-                return Ok(Some(self.read_line_comment().unwrap()));
+                return self.read_line_comment();
             }
 
             self.advance(1);
@@ -886,7 +1040,7 @@ impl Lexer {
 
         if !Syntax::is_number(self.get_current_char()) {
             return Err(LexerError {
-                message: format!("malformed {} expected number, got {}", what, self.get_current_char()).as_str(),
+                message: format!("malformed {} expected number, got {}", what, self.get_current_char()),
                 start: self.get_position() - 2,
                 stop: self.get_position() - 1,
             });
@@ -1007,8 +1161,14 @@ impl Lexer {
                         break;
                     }
 
-                    if self.is_current_value("e") && self.is_current_value("E") && self.read_number_exponent("exponent")
+                    if self.is_current_value("e")
+                        && self.is_current_value("E")
+                        && self.read_number_exponent("exponent").ok().is_some()
                     {
+                        break;
+                    }
+
+                    if self.read_from_array(self.runtime_syntax.number_annotations.clone()) {
                         break;
                     }
 
@@ -1145,7 +1305,7 @@ fn main() {
         comment_escape: false,
     };
 
-    let tokens = lexer.get_tokens();
+    let (tokens, errors) = lexer.get_tokens();
 
     for token in &tokens {
         for wtoken in &token.whitespace {
@@ -1175,7 +1335,13 @@ fn tokenize(code_string: String) -> Vec<Token> {
         comment_escape: false,
     };
 
-    lexer.get_tokens()
+    let (tokens, errors) = lexer.get_tokens();
+
+    for error in &errors {
+        println!("{}", error.message);
+    }
+
+    tokens
 }
 
 fn one_token(tokens: Vec<Token>) -> Token {
@@ -1199,6 +1365,39 @@ fn tokens_to_string(tokens: Vec<Token>) -> String {
     }
 
     result
+}
+
+fn expect_error(code_string: String, expected_error: String) {
+    let code = Code {
+        buffer: code_string,
+        name: "test".to_string(),
+    };
+
+    let mut runtime_syntax = lua_syntax();
+    runtime_syntax.build();
+
+    let mut typesystem_syntax = lua_syntax();
+    typesystem_syntax.build();
+
+    let mut lexer = Lexer {
+        code,
+        position: 0,
+        runtime_syntax,
+        typesystem_syntax,
+        comment_escape: false,
+    };
+
+    let (tokens, errors) = lexer.get_tokens();
+
+    for error in &errors {
+        if error.message.contains(expected_error.as_str()) {
+            return;
+        }
+    }
+
+    if errors.is_empty() {
+        panic!("expected error, got no errors");
+    }
 }
 
 fn check(code: &str) {
@@ -1247,4 +1446,9 @@ fn number_annotations() {
     assert_eq!(tokenize("50ULL".to_string()).len(), 2);
     assert_eq!(tokenize("50LL".to_string()).len(), 2);
     assert_eq!(tokenize("50lL".to_string()).len(), 2);
+}
+
+#[test]
+fn lexer_error() {
+    expect_error("12LOL".to_string(), "malformed_number".to_string());
 }
