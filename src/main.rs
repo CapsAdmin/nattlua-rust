@@ -723,7 +723,7 @@ impl Lexer {
         Ok(None)
     }
 
-    fn read_comment_escape(&mut self) -> Option<TokenType> {
+    fn read_comment_escape(&mut self) -> Result<Option<TokenType>, LexerError> {
         if self.is_value("-", 0)
             && self.is_value("-", 1)
             && self.is_value("[", 2)
@@ -934,7 +934,7 @@ impl Lexer {
                     }
 
                     return Err(LexerError {
-                        message: format!("malformed hex number {} in hex notation", self.get_current_char()).as_str(),
+                        message: format!("malformed hex number {} in hex notation", self.get_current_char()),
                         start: self.get_position() - 1,
                         stop: self.get_position(),
                     });
@@ -962,7 +962,7 @@ impl Lexer {
                 if self.is_current_value("1") || self.is_current_value("0") {
                     self.advance(1);
                 } else {
-                    if Syntax::is_space(self.get_current_char() || Syntax::is_symbol(self.get_current_char())) {
+                    if Syntax::is_space(self.get_current_char()) || Syntax::is_symbol(self.get_current_char()) {
                         break;
                     }
 
@@ -971,14 +971,14 @@ impl Lexer {
                     }
 
                     return Err(LexerError {
-                        message: "malformed binary number, expected 0, 1 or space",
+                        message: "malformed binary number, expected 0, 1 or space".to_string(),
                         start: self.get_position() - 1,
                         stop: self.get_position(),
                     });
                 }
             }
 
-            Ok(Some(TokenType::Number))
+            return Ok(Some(TokenType::Number));
         }
 
         Ok(None)
@@ -1003,7 +1003,7 @@ impl Lexer {
                 if Syntax::is_number(self.get_current_char()) {
                     self.advance(1);
                 } else {
-                    if Syntax::is_space(self.get_current_char() || Syntax::is_symbol(self.get_current_char())) {
+                    if Syntax::is_space(self.get_current_char()) || Syntax::is_symbol(self.get_current_char()) {
                         break;
                     }
 
@@ -1013,7 +1013,7 @@ impl Lexer {
                     }
 
                     return Err(LexerError {
-                        message: "malformed decimal number",
+                        message: "malformed decimal number".to_string(),
                         start: self.get_position() - 1,
                         stop: self.get_position(),
                     });
@@ -1032,12 +1032,9 @@ impl Lexer {
             if self.is_value("x", 1) || self.is_value("X", 1) {
                 return self.read_hex_number();
             } else if self.is_value("b", 1) || self.is_value("B", 1) {
-                self.read_binary_number()
-            } else {
-                self.read_decimal_number()
+                return self.read_binary_number();
             }
-
-            return Ok(Some(TokenType::Number));
+            return self.read_decimal_number();
         }
 
         Ok(None)
@@ -1059,7 +1056,7 @@ impl Lexer {
 
             if !self.is_current_value("=") {
                 return Err(LexerError {
-                    message: "malformed multiline string, expected =",
+                    message: "malformed multiline string, expected =".to_string(),
                     start,
                     stop: self.get_position(),
                 });
@@ -1071,16 +1068,16 @@ impl Lexer {
 
             if let Some(pos) = self.find_nearest(closing.as_str()) {
                 self.set_position(pos);
-                return Some(TokenType::MultilineComment);
+                return Ok(Some(TokenType::MultilineComment));
             }
 
             return Err(LexerError {
-                message: "expected multiline string reached end of code",
+                message: "expected multiline string reached end of code".to_string(),
                 start,
                 stop: self.get_position(),
             });
         }
-        None
+        Ok(None)
     }
 
     fn read_quoted_string(&mut self, quote: char) -> Result<Option<TokenType>, LexerError> {
@@ -1103,7 +1100,7 @@ impl Lexer {
             } else if char == '\n' {
                 self.set_position(start);
                 return Err(LexerError {
-                    message: "expected quote to end",
+                    message: "expected quote to end".to_string(),
                     start,
                     stop: self.get_position() - 1,
                 });
@@ -1113,7 +1110,7 @@ impl Lexer {
         }
 
         return Err(LexerError {
-            message: "expected quote to end: reached end of file",
+            message: "expected quote to end: reached end of file".to_string(),
             start,
             stop: self.get_position() - 1,
         });
