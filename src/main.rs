@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use core::cmp::Reverse;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -47,10 +48,10 @@ pub enum TokenType {
 
 impl TokenType {
     pub fn is_whitespace(&self) -> bool {
-        match self {
-            TokenType::LineComment | TokenType::MultilineComment | TokenType::CommentEscape | TokenType::Space => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            TokenType::LineComment | TokenType::MultilineComment | TokenType::CommentEscape | TokenType::Space
+        )
     }
 }
 
@@ -414,10 +415,6 @@ struct Code {
 }
 
 impl Code {
-    fn new(buffer: String, name: String) -> Code {
-        Code { buffer, name }
-    }
-
     fn substring(&self, begin: usize, end: usize) -> String {
         // TODO: string view?
 
@@ -523,30 +520,30 @@ impl Lexer {
         let mut buffer = String::new();
         buffer.push_str("Error: ");
         buffer.push_str(message);
-        buffer.push_str("\n");
-        buffer.push_str("    ");
+        buffer.push('\n');
+        buffer.push('\t');
         buffer.push_str(self.code.get_string().as_str());
-        buffer.push_str("\n");
-        buffer.push_str("    ");
+        buffer.push('\n');
+        buffer.push('\t');
         if let Some(start) = start {
             for _ in 0..start {
-                buffer.push_str(" ");
+                buffer.push(' ');
             }
-            buffer.push_str("^");
+            buffer.push('^');
         }
-        buffer.push_str("\n");
+        buffer.push('\n');
         if let Some(stop) = stop {
-            buffer.push_str("    ");
+            buffer.push('\t');
             for _ in 0..stop {
-                buffer.push_str(" ");
+                buffer.push(' ');
             }
-            buffer.push_str("^");
+            buffer.push('^');
         }
 
         if args.is_some() {
             for arg in args.unwrap() {
-                buffer.push_str("\n");
-                buffer.push_str("    ");
+                buffer.push('\n');
+                buffer.push('\t');
                 buffer.push_str(arg.as_str());
             }
         }
@@ -730,35 +727,39 @@ impl Lexer {
     }
 
     fn read_single_token(&mut self) -> Result<Token, LexerError> {
-        if let res = self.read_shebang() {
-            if res.is_err() {
-                return Err(res.unwrap_err());
-            } else if let Ok(Some(kind)) = res {
-                return Ok(Self::new_token(kind, 0, self.get_position()));
-            }
-        }
-
-        if let res = self.read_remaining_comment_escape() {
-            if res.is_err() {
-                return Err(res.unwrap_err());
-            } else if let Ok(Some(kind)) = res {
-                return Ok(Self::new_token(kind, self.get_position() - 1, self.get_position()));
-            }
-        }
-
         let start = self.get_position();
 
-        if let res = self.read_whitespace() {
-            if res.is_err() {
-                return Err(res.unwrap_err());
+        {
+            let res = self.read_shebang();
+            if let Err(err) = res {
+                return Err(err);
             } else if let Ok(Some(kind)) = res {
                 return Ok(Self::new_token(kind, start, self.get_position()));
             }
         }
 
-        if let res = self.read_non_whitespace() {
-            if res.is_err() {
-                return Err(res.unwrap_err());
+        {
+            let res = self.read_remaining_comment_escape();
+            if let Err(err) = res {
+                return Err(err);
+            } else if let Ok(Some(kind)) = res {
+                return Ok(Self::new_token(kind, start, self.get_position()));
+            }
+        }
+
+        {
+            let res = self.read_whitespace();
+            if let Err(err) = res {
+                return Err(err);
+            } else if let Ok(Some(kind)) = res {
+                return Ok(Self::new_token(kind, start, self.get_position()));
+            }
+        }
+
+        {
+            let res = self.read_non_whitespace();
+            if let Err(err) = res {
+                return Err(err);
             } else if let Ok(Some(kind)) = res {
                 return Ok(Self::new_token(kind, start, self.get_position()));
             }
@@ -1054,7 +1055,7 @@ impl Lexer {
             self.advance(1);
         }
 
-        return Ok(true);
+        Ok(true)
     }
 
     fn read_hex_number(&mut self) -> Result<Option<TokenType>, LexerError> {
@@ -1142,10 +1143,7 @@ impl Lexer {
         if Syntax::is_number(self.get_current_char())
             || (self.is_current_value(".") && Syntax::is_number(self.get_byte_char_offset(1) as char))
         {
-            let mut dot = false;
-
             if self.is_current_value(".") {
-                dot = true;
                 self.advance(1);
             }
 
@@ -1255,7 +1253,9 @@ impl Lexer {
                 let char = self.read_char();
 
                 if char == 'z' && !self.is_current_value(quote.to_string().as_str()) {
-                    self.read_space();
+                    if let Err(err) = self.read_space() {
+                        return Err(err);
+                    }
                 }
             } else if char == '\n' {
                 self.set_position(start);
@@ -1269,11 +1269,11 @@ impl Lexer {
             }
         }
 
-        return Err(LexerError {
+        Err(LexerError {
             message: "expected quote to end: reached end of file".to_string(),
             start,
             stop: self.get_position() - 1,
-        });
+        })
     }
 
     fn read_single_quoted_string(&mut self) -> Result<Option<TokenType>, LexerError> {
@@ -1294,7 +1294,7 @@ fn main() {
     let mut runtime_syntax = lua_syntax();
     runtime_syntax.build();
 
-    let mut typesystem_syntax = lua_syntax();
+    let mut typesystem_syntax = lua_typesystem_syntax();
     typesystem_syntax.build();
 
     let mut lexer = Lexer {
@@ -1305,11 +1305,11 @@ fn main() {
         comment_escape: false,
     };
 
-    let (tokens, errors) = lexer.get_tokens();
+    let (tokens, _) = lexer.get_tokens();
 
     for token in &tokens {
-        for wtoken in &token.whitespace {
-            print!("{}", wtoken.value);
+        for whitespace_token in &token.whitespace {
+            print!("{}", whitespace_token.value);
         }
         print!("{}", token.value);
     }
@@ -1324,7 +1324,7 @@ fn tokenize(code_string: String) -> Vec<Token> {
     let mut runtime_syntax = lua_syntax();
     runtime_syntax.build();
 
-    let mut typesystem_syntax = lua_syntax();
+    let mut typesystem_syntax = lua_typesystem_syntax();
     typesystem_syntax.build();
 
     let mut lexer = Lexer {
@@ -1358,8 +1358,8 @@ fn tokens_to_string(tokens: Vec<Token>) -> String {
     let mut result = String::new();
 
     for token in &tokens {
-        for wtoken in &token.whitespace {
-            result.push_str(&wtoken.value);
+        for whitespace_token in &token.whitespace {
+            result.push_str(&whitespace_token.value);
         }
         result.push_str(&token.value);
     }
@@ -1367,7 +1367,7 @@ fn tokens_to_string(tokens: Vec<Token>) -> String {
     result
 }
 
-fn expect_error(code_string: String, expected_error: String) {
+fn expect_error(code_string: String, expected_error: String) -> Vec<Token> {
     let code = Code {
         buffer: code_string,
         name: "test".to_string(),
@@ -1376,7 +1376,7 @@ fn expect_error(code_string: String, expected_error: String) {
     let mut runtime_syntax = lua_syntax();
     runtime_syntax.build();
 
-    let mut typesystem_syntax = lua_syntax();
+    let mut typesystem_syntax = lua_typesystem_syntax();
     typesystem_syntax.build();
 
     let mut lexer = Lexer {
@@ -1391,13 +1391,15 @@ fn expect_error(code_string: String, expected_error: String) {
 
     for error in &errors {
         if error.message.contains(expected_error.as_str()) {
-            return;
+            return tokens;
         }
     }
 
     if errors.is_empty() {
         panic!("expected error, got no errors");
     }
+
+    tokens
 }
 
 fn check(code: &str) {
