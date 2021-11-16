@@ -1159,10 +1159,10 @@ impl Lexer {
                         break;
                     }
 
-                    if self.is_current_value("e")
-                        && self.is_current_value("E")
-                        && self.read_number_exponent("exponent").ok().is_some()
-                    {
+                    if self.is_current_value("e") || self.is_current_value("E") {
+                        if let Err(err) = self.read_number_exponent("exponent") {
+                            return Err(err);
+                        }
                         break;
                     }
 
@@ -1315,9 +1315,9 @@ fn main() {
     }
 }
 
-fn tokenize(code_string: String) -> Vec<Token> {
+fn tokenize(code_string: &str) -> Vec<Token> {
     let code = Code {
-        buffer: code_string,
+        buffer: code_string.to_string(),
         name: "test".to_string(),
     };
 
@@ -1367,9 +1367,9 @@ fn tokens_to_string(tokens: Vec<Token>) -> String {
     result
 }
 
-fn expect_error(code_string: String, expected_error: String) -> Vec<Token> {
+fn expect_error(code_string: &str, expected_error: &str) -> Vec<Token> {
     let code = Code {
-        buffer: code_string,
+        buffer: code_string.to_string(),
         name: "test".to_string(),
     };
 
@@ -1390,16 +1390,22 @@ fn expect_error(code_string: String, expected_error: String) -> Vec<Token> {
     let (tokens, errors) = lexer.get_tokens();
 
     for error in &errors {
-        if error.message.contains(expected_error.as_str()) {
+        if error.message.contains(expected_error) {
             return tokens;
         }
+    }
+
+    println!("could not find error {} got these instead:", expected_error);
+
+    for error in &errors {
+        println!("\n{}", error.message);
     }
 
     panic!("expected error, got no errors");
 }
 
 fn check(code: &str) {
-    let actual = tokens_to_string(tokenize(code.to_string()));
+    let actual = tokens_to_string(tokenize(&code));
 
     assert_eq!(actual, code);
 }
@@ -1411,42 +1417,45 @@ fn tokens_to_string_test() {
 
 #[test]
 fn unclosed_multiline_comment() {
-    assert_eq!(tokenize("".to_string())[0].kind, TokenType::EndOfFile);
-    assert_eq!(one_token(tokenize("a".to_string())).kind, TokenType::Letter);
-    assert_eq!(one_token(tokenize("1".to_string())).kind, TokenType::Number);
-    assert_eq!(one_token(tokenize("(".to_string())).kind, TokenType::Symbol);
+    assert_eq!(tokenize("")[0].kind, TokenType::EndOfFile);
+    assert_eq!(one_token(tokenize("a")).kind, TokenType::Letter);
+    assert_eq!(one_token(tokenize("1")).kind, TokenType::Number);
+    assert_eq!(one_token(tokenize("(")).kind, TokenType::Symbol);
 }
 
 #[test]
 fn shebang() {
-    assert_eq!(tokenize("#!/usr/bin/env lua".to_string())[0].kind, TokenType::Shebang);
+    assert_eq!(tokenize("#!/usr/bin/env lua")[0].kind, TokenType::Shebang);
 }
 
 #[test]
 fn single_quote_string() {
-    assert_eq!(one_token(tokenize("'1'".to_string())).kind, TokenType::String);
+    assert_eq!(one_token(tokenize("'1'")).kind, TokenType::String);
 }
 
 #[test]
 fn z_escaped_string() {
-    assert_eq!(one_token(tokenize("\"a\\z\na\"".to_string())).kind, TokenType::String);
+    assert_eq!(one_token(tokenize("\"a\\z\na\"")).kind, TokenType::String);
 }
 
 #[test]
 fn number_range() {
-    assert_eq!(tokenize("1..20".to_string()).len(), 4);
+    assert_eq!(tokenize("1..20").len(), 4);
 }
 
 #[test]
 fn number_annotations() {
-    assert_eq!(tokenize("50ull".to_string()).len(), 2);
-    assert_eq!(tokenize("50uLL".to_string()).len(), 2);
-    assert_eq!(tokenize("50ULL".to_string()).len(), 2);
-    assert_eq!(tokenize("50LL".to_string()).len(), 2);
-    assert_eq!(tokenize("50lL".to_string()).len(), 2);
+    assert_eq!(tokenize("50ull").len(), 2);
+    assert_eq!(tokenize("50uLL").len(), 2);
+    assert_eq!(tokenize("50ULL").len(), 2);
+    assert_eq!(tokenize("50LL").len(), 2);
+    assert_eq!(tokenize("50lL").len(), 2);
 }
 
 #[test]
-fn lexer_error() {
-    expect_error("12LOL".to_string(), "malformed decimal number".to_string());
+fn malformed_number() {
+    expect_error("12LOL", "malformed decimal number");
+    expect_error("0xbLOL", "malformed hex number");
+    expect_error("0b101LOL01", "malformed binary number");
+    expect_error("1.5eD", "after 'exponent'");
 }
