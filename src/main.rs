@@ -1305,3 +1305,9 @@ fn malformed_number() {
     expect_error("0b101LOL01", "malformed binary number");
     expect_error("1.5eD", "after 'exponent'");
 }
+
+#[test]
+fn multiline_comment_error() {
+    expect_error("/*", "tried to find end of multiline c comment");
+    expect_error("--[[", "unclosed multiline comment");
+}
