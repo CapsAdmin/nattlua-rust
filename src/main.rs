@@ -825,10 +825,12 @@ impl Lexer {
             }
 
             self.advance(1);
-            let eq = ("=").repeat(self.get_position() - start - 4);
+            let pos = self.get_position();
 
-            if let Some(pos) = self.find_nearest(("]".to_string() + &eq + "]").as_str()) {
-                self.set_position(pos);
+            let closing = "]".to_string() + &("=").repeat(pos - start - 2) + "]";
+
+            if let Some(pos2) = self.find_nearest(closing.as_str()) {
+                self.set_position(pos + pos2 + closing.len());
                 return Ok(Some(TokenType::MultilineComment));
             }
 
@@ -1073,7 +1075,7 @@ impl Lexer {
             let closing = "]".to_string() + &("=").repeat(pos - start - 2) + "]";
 
             if let Some(pos2) = self.find_nearest(closing.as_str()) {
-                self.set_position(pos + pos2 + closing.len() - 1);
+                self.set_position(pos + pos2 + closing.len());
                 return Ok(Some(TokenType::MultilineComment));
             }
 
@@ -1327,9 +1329,9 @@ fn string_error() {
 
 #[test]
 fn multiline_string() {
-    assert_eq!(tokenize("a = [[a]]").len(), 4);
-    assert_eq!(tokenize("a = [=[a]=]").len(), 4);
-    assert_eq!(tokenize("a = [==[a]==]").len(), 4);
+    assert_eq!(tokenize("a = [[a]]").len(), 3);
+    assert_eq!(tokenize("a = [=[a]=]").len(), 3);
+    assert_eq!(tokenize("a = [==[a]==]").len(), 3);
 
     expect_error("a = [=a", "malformed multiline string");
     expect_error("a = [[a", "expected multiline string reached end of code");
@@ -1337,16 +1339,16 @@ fn multiline_string() {
 
 #[test]
 fn multiline_comment() {
-    assert_eq!(tokenize("--[[a]]").len(), 2);
-    assert_eq!(tokenize("--[=[a]=]").len(), 2);
-    assert_eq!(tokenize("--[==[a]==]").len(), 2);
-    assert_eq!(tokenize("/*a*/").len(), 2);
+    assert_eq!(tokenize("--[[a]]")[0].kind, TokenType::EndOfFile);
+    assert_eq!(tokenize("--[=[a]=]")[0].kind, TokenType::EndOfFile);
+    assert_eq!(tokenize("--[==[a]==]")[0].kind, TokenType::EndOfFile);
+    assert_eq!(tokenize("/*a*/")[0].kind, TokenType::EndOfFile);
 }
 
 #[test]
 fn line_comment() {
-    assert_eq!(tokenize("-- a").len(), 1);
-    assert_eq!(tokenize("// a").len(), 1);
+    assert_eq!(tokenize("-- a")[0].kind, TokenType::EndOfFile);
+    assert_eq!(tokenize("// a")[0].kind, TokenType::EndOfFile);
 }
 
 #[test]
