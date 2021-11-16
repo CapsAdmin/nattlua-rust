@@ -1355,3 +1355,12 @@ fn line_comment() {
 fn comment_escape() {
     assert_eq!(one_token(tokenize("--[[# 1337 ]]")).kind, TokenType::Number);
 }
+
+#[test]
+fn typesystem_symbols() {
+    assert_eq!(tokenize("$'foo'").len(), 3);
+}
+#[test]
+fn unknown_symbols() {
+    assert_eq!(tokenize("```").len(), 4);
+}
