@@ -827,7 +827,7 @@ impl Lexer {
             self.advance(1);
             let pos = self.get_position();
 
-            let closing = "]".to_string() + &("=").repeat(pos - start - 2) + "]";
+            let closing = "]".to_string() + &("=").repeat(pos - start - 4) + "]";
 
             if let Some(pos2) = self.find_nearest(closing.as_str()) {
                 self.set_position(pos + pos2 + closing.len());
