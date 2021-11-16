@@ -1334,3 +1334,22 @@ fn multiline_string() {
     expect_error("a = [=a", "malformed multiline string");
     expect_error("a = [[a", "expected multiline string reached end of code");
 }
+
+#[test]
+fn multiline_comment() {
+    assert_eq!(tokenize("--[[a]]").len(), 2);
+    assert_eq!(tokenize("--[=[a]=]").len(), 2);
+    assert_eq!(tokenize("--[==[a]==]").len(), 2);
+    assert_eq!(tokenize("/*a*/").len(), 2);
+}
+
+#[test]
+fn line_comment() {
+    assert_eq!(tokenize("-- a").len(), 1);
+    assert_eq!(tokenize("// a").len(), 1);
+}
+
+#[test]
+fn comment_escape() {
+    assert_eq!(one_token(tokenize("--[[# 1337 ]]")).kind, TokenType::Number);
+}
