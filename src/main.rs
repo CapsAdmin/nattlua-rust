@@ -1395,11 +1395,7 @@ fn expect_error(code_string: String, expected_error: String) -> Vec<Token> {
         }
     }
 
-    if errors.is_empty() {
-        panic!("expected error, got no errors");
-    }
-
-    tokens
+    panic!("expected error, got no errors");
 }
 
 fn check(code: &str) {
@@ -1452,5 +1448,5 @@ fn number_annotations() {
 
 #[test]
 fn lexer_error() {
-    expect_error("12LOL".to_string(), "malformed_number".to_string());
+    expect_error("12LOL".to_string(), "malformed decimal number".to_string());
 }
