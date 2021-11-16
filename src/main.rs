@@ -502,14 +502,6 @@ impl Lexer {
         self.get_byte_char_offset(offset) == byte
     }
 
-    fn is_current_byte(&self, byte: u8) -> bool {
-        self.is_byte(byte, 0)
-    }
-
-    fn is_current_value(&self, value: &str) -> bool {
-        self.is_value(value, 0)
-    }
-
     fn is_value(&self, value: &str, offset: usize) -> bool {
         let l = self.get_string(self.get_position() + offset, self.get_position() + offset + value.len());
 
@@ -679,11 +671,11 @@ impl Lexer {
     }
 
     fn read_shebang(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.get_position() == 0 && self.is_current_value("#") {
+        if self.get_position() == 0 && self.is_value("#", 0) {
             while !self.the_end() {
                 self.advance(1);
 
-                if self.is_current_value("\n") {
+                if self.is_value("\n", 0) {
                     break;
                 }
             }
@@ -788,7 +780,7 @@ impl Lexer {
         if self.is_value("-", 0) && self.is_value("-", 1) {
             self.advance(2);
             while !self.the_end() {
-                if self.is_current_value("\n") {
+                if self.is_value("\n", 0) {
                     break;
                 }
                 self.advance(1);
@@ -802,7 +794,7 @@ impl Lexer {
         if self.is_value("/", 0) && self.is_value("/", 1) {
             self.advance(2);
             while !self.the_end() {
-                if self.is_current_value("\n") {
+                if self.is_value("\n", 0) {
                     break;
                 }
                 self.advance(1);
@@ -822,12 +814,12 @@ impl Lexer {
             let start = self.get_position();
             self.advance(3);
 
-            while self.is_current_value("=") {
+            while self.is_value("=", 0) {
                 self.advance(1);
             }
 
             // if we have an incomplete multiline comment, it's just a single line comment
-            if !self.is_current_value("[") {
+            if !self.is_value("[", 0) {
                 self.set_position(start);
                 return self.read_line_comment();
             }
@@ -856,7 +848,7 @@ impl Lexer {
         if self.is_value("§", 0) {
             self.advance(2);
             while !self.the_end() {
-                if self.is_current_value("\n") {
+                if self.is_value("\n", 0) {
                     break;
                 }
                 self.advance(1);
@@ -871,7 +863,7 @@ impl Lexer {
         if self.is_value("£", 0) {
             self.advance(2);
             while !self.the_end() {
-                if self.is_current_value("\n") {
+                if self.is_value("\n", 0) {
                     break;
                 }
                 self.advance(1);
@@ -886,7 +878,7 @@ impl Lexer {
         // skip the 'e', 'E', 'p' or 'P'
         self.advance(1);
 
-        if self.is_current_value("+") || self.is_current_value("-") {
+        if self.is_value("+", 0) || self.is_value("-", 0) {
             self.advance(1);
         } else {
             return Err(LexerError {
@@ -923,11 +915,11 @@ impl Lexer {
             self.advance(2);
 
             while !self.the_end() {
-                if self.is_current_value("_") {
+                if self.is_value("_", 0) {
                     self.advance(1);
                 }
 
-                if self.is_current_value(".") && !self.is_value(".", 1) {
+                if self.is_value(".", 0) && !self.is_value(".", 1) {
                     self.advance(1);
                 }
 
@@ -938,10 +930,7 @@ impl Lexer {
                         break;
                     }
 
-                    if self.is_current_value("p")
-                        && self.is_current_value("P")
-                        && self.read_number_exponent("pow").is_ok()
-                    {
+                    if self.is_value("p", 0) && self.is_value("P", 0) && self.read_number_exponent("pow").is_ok() {
                         break;
                     }
 
@@ -967,11 +956,11 @@ impl Lexer {
 
             while !self.the_end() {
                 // EXTENSION: allow numbers to be separated by _
-                if self.is_current_value("_") {
+                if self.is_value("_", 0) {
                     self.advance(1);
                 }
 
-                if self.is_current_value("1") || self.is_current_value("0") {
+                if self.is_value("1", 0) || self.is_value("0", 0) {
                     self.advance(1);
                 } else {
                     if Syntax::is_space(self.get_current_char()) || Syntax::is_symbol(self.get_current_char()) {
@@ -998,14 +987,14 @@ impl Lexer {
 
     fn read_decimal_number(&mut self) -> Result<Option<TokenType>, LexerError> {
         if Syntax::is_number(self.get_current_char())
-            || (self.is_current_value(".") && Syntax::is_number(self.get_byte_char_offset(1) as char))
+            || (self.is_value(".", 0) && Syntax::is_number(self.get_byte_char_offset(1) as char))
         {
-            if self.is_current_value(".") {
+            if self.is_value(".", 0) {
                 self.advance(1);
             }
 
             while !self.the_end() {
-                if self.is_current_value("_") {
+                if self.is_value("_", 0) {
                     self.advance(1);
                 }
 
@@ -1016,7 +1005,7 @@ impl Lexer {
                         break;
                     }
 
-                    if self.is_current_value("e") || self.is_current_value("E") {
+                    if self.is_value("e", 0) || self.is_value("E", 0) {
                         if let Err(err) = self.read_number_exponent("exponent") {
                             return Err(err);
                         }
@@ -1042,7 +1031,7 @@ impl Lexer {
 
     fn read_number(&mut self) -> Result<Option<TokenType>, LexerError> {
         if Syntax::is_number(self.get_current_char())
-            || (self.is_current_value(".") && Syntax::is_number(self.get_byte_char_offset(1) as char))
+            || (self.is_value(".", 0) && Syntax::is_number(self.get_byte_char_offset(1) as char))
         {
             if self.is_value("x", 1) || self.is_value("X", 1) {
                 return self.read_hex_number();
@@ -1060,16 +1049,16 @@ impl Lexer {
             let start = self.get_position();
             self.advance(1);
 
-            if self.is_current_value("=") {
+            if self.is_value("=", 0) {
                 while !self.the_end() {
                     self.advance(1);
-                    if !self.is_current_value("=") {
+                    if !self.is_value("=", 0) {
                         break;
                     }
                 }
             }
 
-            if !self.is_current_value("=") {
+            if !self.is_value("=", 0) {
                 return Err(LexerError {
                     message: "malformed multiline string, expected =".to_string(),
                     start,
@@ -1096,7 +1085,7 @@ impl Lexer {
     }
 
     fn read_quoted_string(&mut self, quote: char) -> Result<Option<TokenType>, LexerError> {
-        if !self.is_current_byte(quote as u8) {
+        if !self.is_byte(quote as u8, 0) {
             return Ok(None);
         }
 
@@ -1109,7 +1098,7 @@ impl Lexer {
             if char == '\\' {
                 let char = self.read_char();
 
-                if char == 'z' && !self.is_current_value(quote.to_string().as_str()) {
+                if char == 'z' && !self.is_value(quote.to_string().as_str(), 0) {
                     if let Err(err) = self.read_space() {
                         return Err(err);
                     }
