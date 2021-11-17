@@ -66,7 +66,7 @@ impl Error for LexerError {}
 
 impl fmt::Display for LexerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Oh no, something bad went down")
+        write!(f, "{}", self.message)
     }
 }
 
@@ -426,10 +426,6 @@ impl Code<'_> {
         ""
     }
 
-    fn get_buffer(&self) -> &str {
-        self.buffer
-    }
-
     fn len(&self) -> usize {
         self.buffer.len()
     }
@@ -494,10 +490,6 @@ impl Lexer<'_> {
         self.position >= self.get_length()
     }
 
-    fn is_byte(&self, chr: char, offset: usize) -> bool {
-        self.get_char_offset(offset) == chr
-    }
-
     fn is_value(&self, value: &str, offset: usize) -> bool {
         let l = self.get_string(self.position + offset, self.position + offset + value.len());
 
@@ -507,39 +499,7 @@ impl Lexer<'_> {
         self.is_value(char.to_string().as_str(), offset)
     }
 
-    fn error(&self, message: &str, start: Option<usize>, stop: Option<usize>, args: Option<Vec<String>>) {
-        let mut buffer = String::new();
-        buffer.push_str("Error: ");
-        buffer.push_str(message);
-        buffer.push('\n');
-        buffer.push('\t');
-        buffer.push_str(self.code.get_buffer());
-        buffer.push('\n');
-        buffer.push('\t');
-        if let Some(start) = start {
-            for _ in 0..start {
-                buffer.push(' ');
-            }
-            buffer.push('^');
-        }
-        buffer.push('\n');
-        if let Some(stop) = stop {
-            buffer.push('\t');
-            for _ in 0..stop {
-                buffer.push(' ');
-            }
-            buffer.push('^');
-        }
-
-        if args.is_some() {
-            for arg in args.unwrap() {
-                buffer.push('\n');
-                buffer.push('\t');
-                buffer.push_str(arg.as_str());
-            }
-        }
-        println!("{}", buffer);
-    }
+    fn error(&self, message: &str, start: Option<usize>, stop: Option<usize>, args: Option<Vec<String>>) {}
 
     fn new_token(kind: TokenType, start: usize, stop: usize) -> Token {
         Token {
@@ -1032,18 +992,11 @@ impl Lexer<'_> {
     }
 
     fn read_number(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if Syntax::is_number(self.get_current_char())
-            || (self.is_value(".", 0) && Syntax::is_number(self.get_char_offset(1) as char))
-        {
-            if self.is_value("x", 1) || self.is_value("X", 1) {
-                return self.read_hex_number();
-            } else if self.is_value("b", 1) || self.is_value("B", 1) {
-                return self.read_binary_number();
-            }
-            return self.read_decimal_number();
-        }
-
-        Ok(None)
+        self.read_hex_number()
+            .transpose()
+            .or_else(|| self.read_binary_number().transpose())
+            .or_else(|| self.read_decimal_number().transpose())
+            .transpose()
     }
 
     fn read_multiline_string(&mut self) -> Result<Option<TokenType>, LexerError> {
@@ -1133,36 +1086,7 @@ impl Lexer<'_> {
         self.read_quoted_string('"')
     }
 }
-
-fn main() {
-    let code = Code {
-        buffer: "5.6e3",
-        name: "test",
-    };
-
-    let mut runtime_syntax = lua_syntax();
-    runtime_syntax.build();
-
-    let mut typesystem_syntax = lua_typesystem_syntax();
-    typesystem_syntax.build();
-
-    let mut lexer = Lexer {
-        code,
-        position: 0,
-        runtime_syntax,
-        typesystem_syntax,
-        comment_escape: false,
-    };
-
-    let (tokens, _) = lexer.get_tokens();
-
-    for token in &tokens {
-        for whitespace_token in &token.whitespace {
-            print!("{}", whitespace_token.value);
-        }
-        print!("{}", token.value);
-    }
-}
+fn main() {}
 
 fn tokenize(code_string: &str) -> Vec<Token> {
     let code = Code {
@@ -1187,7 +1111,7 @@ fn tokenize(code_string: &str) -> Vec<Token> {
     let (tokens, errors) = lexer.get_tokens();
 
     for error in &errors {
-        println!("{}", error.message);
+        println!("{}", error);
     }
 
     tokens
@@ -1247,7 +1171,7 @@ fn expect_error(code_string: &str, expected_error: &str) -> Vec<Token> {
     println!("could not find error {} got these instead:", expected_error);
 
     for error in &errors {
-        println!("\n{}", error.message);
+        println!("\t{}", error);
     }
 
     panic!("expected error, got no errors");
@@ -1315,6 +1239,7 @@ fn malformed_number() {
     expect_error("0xbLOL", "malformed hex number");
     expect_error("0b101LOL01", "malformed binary number");
     expect_error("1.5eD", "after 'exponent'");
+    expect_error("1.5e+D", "malformed exponent expected number, got D");
 }
 
 #[test]
