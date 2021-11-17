@@ -409,31 +409,36 @@ fn lua_typesystem_syntax() -> Syntax {
     syntax
 }
 
-struct Code {
-    buffer: String,
-    name: String,
+struct Code<'a> {
+    buffer: &'a str,
+    name: &'a str,
 }
 
-impl Code {
-    fn substring(&self, begin: usize, end: usize) -> String {
-        // TODO: string view?
+impl Code<'_> {
+    fn substring(&self, begin: usize, end: usize) -> &str {
+        let start = std::cmp::min(begin, self.len());
+        let stop = std::cmp::min(end, self.len());
 
-        let start = std::cmp::min(begin, self.get_length());
-        let stop = std::cmp::min(end, self.get_length());
+        if self.buffer.is_char_boundary(start) && self.buffer.is_char_boundary(stop) {
+            return &self.buffer[start..stop];
+        }
 
-        self.buffer[start..stop].to_string()
+        ""
     }
 
-    fn get_string(&self) -> &String {
-        &self.buffer
+    fn get_buffer(&self) -> &str {
+        self.buffer
     }
 
-    fn get_length(&self) -> usize {
+    fn len(&self) -> usize {
         self.buffer.len()
     }
 
-    fn get_byte(&self, pos: usize) -> u8 {
-        *self.buffer.as_bytes().get(pos).or(Some(&0u8)).unwrap()
+    fn get_char(&self, pos: usize) -> char {
+        if pos >= self.len() {
+            return 0 as char;
+        }
+        self.buffer.as_bytes()[pos] as char
     }
 
     fn find_nearest(&self, find: &str, from_index: usize) -> Option<usize> {
@@ -441,51 +446,42 @@ impl Code {
     }
 }
 
-struct Lexer {
-    code: Code,
+struct Lexer<'a> {
+    code: Code<'a>,
     position: usize,
     runtime_syntax: Syntax,
     typesystem_syntax: Syntax,
     comment_escape: bool,
 }
 
-impl Lexer {
+impl Lexer<'_> {
     fn get_length(&self) -> usize {
-        self.code.get_length()
+        self.code.len()
     }
 
-    fn get_string(&self, start: usize, stop: usize) -> String {
+    fn get_string(&self, start: usize, stop: usize) -> &str {
         self.code.substring(start, stop)
     }
 
-    fn get_byte_char_offset(&self, offset: usize) -> u8 {
-        self.code.get_byte(self.position + offset)
+    fn get_char_offset(&self, offset: usize) -> char {
+        self.code.get_char(self.position + offset)
     }
 
     fn get_current_char(&self) -> char {
-        self.get_byte_char_offset(0) as char
-    }
-
-    fn set_position(&mut self, position: usize) -> &mut Self {
-        self.position = position;
-        self
-    }
-
-    fn get_position(&self) -> usize {
-        self.position
+        self.get_char_offset(0) as char
     }
 
     fn reset_state(&mut self) -> &mut Self {
-        self.set_position(0);
+        self.position = 0;
         self
     }
 
     fn find_nearest(&self, str: &str) -> Option<usize> {
-        self.code.find_nearest(str, self.get_position())
+        self.code.find_nearest(str, self.position)
     }
 
     fn advance(&mut self, offset: usize) -> &mut Self {
-        self.set_position(self.get_position() + offset);
+        self.position += offset;
         self
     }
 
@@ -495,17 +491,20 @@ impl Lexer {
         char
     }
     fn the_end(&self) -> bool {
-        self.get_position() >= self.get_length()
+        self.position >= self.get_length()
     }
 
-    fn is_byte(&self, byte: u8, offset: usize) -> bool {
-        self.get_byte_char_offset(offset) == byte
+    fn is_byte(&self, chr: char, offset: usize) -> bool {
+        self.get_char_offset(offset) == chr
     }
 
     fn is_value(&self, value: &str, offset: usize) -> bool {
-        let l = self.get_string(self.get_position() + offset, self.get_position() + offset + value.len());
+        let l = self.get_string(self.position + offset, self.position + offset + value.len());
 
         l == value
+    }
+    fn is_char(&self, char: char, offset: usize) -> bool {
+        self.is_value(char.to_string().as_str(), offset)
     }
 
     fn error(&self, message: &str, start: Option<usize>, stop: Option<usize>, args: Option<Vec<String>>) {
@@ -514,7 +513,7 @@ impl Lexer {
         buffer.push_str(message);
         buffer.push('\n');
         buffer.push('\t');
-        buffer.push_str(self.code.get_string().as_str());
+        buffer.push_str(self.code.get_buffer());
         buffer.push('\n');
         buffer.push('\t');
         if let Some(start) = start {
@@ -555,7 +554,7 @@ impl Lexer {
     fn read_from_array(&mut self, array: Vec<String>) -> bool {
         for annotation in array {
             if self
-                .get_string(self.get_position(), self.get_position() + annotation.len())
+                .get_string(self.position, self.position + annotation.len())
                 .to_lowercase()
                 == annotation.clone()
             {
@@ -603,7 +602,7 @@ impl Lexer {
     }
 
     fn read_single_token(&mut self) -> Result<Token, LexerError> {
-        let start = self.get_position();
+        let start = self.position;
 
         let res = self
             .read_shebang()
@@ -621,7 +620,7 @@ impl Lexer {
 
         let kind = res.unwrap().unwrap();
 
-        Ok(Self::new_token(kind, start, self.get_position()))
+        Ok(Self::new_token(kind, start, self.position))
     }
 
     fn read_token(&mut self) -> Result<Token, LexerError> {
@@ -635,9 +634,9 @@ impl Lexer {
                     whitespace_tokens.push(token);
                 } else {
                     for tk in &mut whitespace_tokens {
-                        tk.value = self.get_string(tk.start, tk.stop);
+                        tk.value = self.get_string(tk.start, tk.stop).to_string();
                     }
-                    token.value = self.get_string(token.start, token.stop);
+                    token.value = self.get_string(token.start, token.stop).to_string();
                     token.whitespace = whitespace_tokens.clone();
                     whitespace_tokens.clear();
                     return Ok(token);
@@ -671,7 +670,7 @@ impl Lexer {
     }
 
     fn read_shebang(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.get_position() == 0 && self.is_value("#", 0) {
+        if self.position == 0 && self.is_value("#", 0) {
             while !self.the_end() {
                 self.advance(1);
 
@@ -728,12 +727,7 @@ impl Lexer {
     }
 
     fn read_comment_escape(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("-", 0)
-            && self.is_value("-", 1)
-            && self.is_value("[", 2)
-            && self.is_value("[", 3)
-            && self.is_value("#", 4)
-        {
+        if self.is_value("--[[#", 0) {
             self.advance(5);
             self.comment_escape = true;
             return Ok(Some(TokenType::CommentEscape));
@@ -743,7 +737,7 @@ impl Lexer {
     }
 
     fn read_remaining_comment_escape(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.comment_escape && self.is_value("]", 0) && self.is_value("]", 1) {
+        if self.comment_escape && self.is_value("]]", 0) {
             self.advance(2);
             self.comment_escape = false;
             return Ok(Some(TokenType::CommentEscape));
@@ -753,12 +747,12 @@ impl Lexer {
     }
 
     fn read_multiline_c_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("/", 0) && self.is_value("*", 1) {
-            let start = self.get_position();
+        if self.is_value("/*", 0) {
+            let start = self.position;
             self.advance(2);
 
             while !self.the_end() {
-                if self.is_value("*", 0) && self.is_value("/", 1) {
+                if self.is_value("*/", 0) {
                     self.advance(2);
                     return Ok(Some(TokenType::MultilineComment));
                 }
@@ -769,7 +763,7 @@ impl Lexer {
             return Err(LexerError {
                 message: "tried to find end of multiline c comment, reached end of code".to_string(),
                 start,
-                stop: self.get_position(),
+                stop: self.position,
             });
         }
 
@@ -777,7 +771,7 @@ impl Lexer {
     }
 
     fn read_line_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("-", 0) && self.is_value("-", 1) {
+        if self.is_value("--", 0) {
             self.advance(2);
             while !self.the_end() {
                 if self.is_value("\n", 0) {
@@ -791,7 +785,7 @@ impl Lexer {
         Ok(None)
     }
     fn read_line_c_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("/", 0) && self.is_value("/", 1) {
+        if self.is_value("//", 0) {
             self.advance(2);
             while !self.the_end() {
                 if self.is_value("\n", 0) {
@@ -806,12 +800,8 @@ impl Lexer {
     }
 
     fn read_multiline_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("-", 0)
-            && self.is_value("-", 1)
-            && self.is_value("[", 2)
-            && (self.is_value("[", 3) || self.is_value("=", 3))
-        {
-            let start = self.get_position();
+        if self.is_value("--[", 0) && (self.is_value("[", 3) || self.is_value("=", 3)) {
+            let start = self.position;
             self.advance(3);
 
             while self.is_value("=", 0) {
@@ -820,21 +810,21 @@ impl Lexer {
 
             // if we have an incomplete multiline comment, it's just a single line comment
             if !self.is_value("[", 0) {
-                self.set_position(start);
+                self.position = start;
                 return self.read_line_comment();
             }
 
             self.advance(1);
-            let pos = self.get_position();
+            let pos = self.position;
 
             let closing = "]".to_string() + &("=").repeat(pos - start - 4) + "]";
 
             if let Some(pos2) = self.find_nearest(closing.as_str()) {
-                self.set_position(pos + pos2 + closing.len());
+                self.position = pos + pos2 + closing.len();
                 return Ok(Some(TokenType::MultilineComment));
             }
 
-            self.set_position(start + 2);
+            self.position = start + 2;
 
             return Err(LexerError {
                 message: "unclosed multiline comment".to_string(),
@@ -885,16 +875,16 @@ impl Lexer {
         } else {
             return Err(LexerError {
                 message: format!("expected '+' or '-' after '{}'", what),
-                start: self.get_position() - 1,
-                stop: self.get_position(),
+                start: self.position - 1,
+                stop: self.position,
             });
         }
 
         if !Syntax::is_number(self.get_current_char()) {
             return Err(LexerError {
                 message: format!("malformed {} expected number, got {}", what, self.get_current_char()),
-                start: self.get_position() - 2,
-                stop: self.get_position() - 1,
+                start: self.position - 2,
+                stop: self.position - 1,
             });
         }
 
@@ -938,8 +928,8 @@ impl Lexer {
 
                     return Err(LexerError {
                         message: format!("malformed hex number {} in hex notation", self.get_current_char()),
-                        start: self.get_position() - 1,
-                        stop: self.get_position(),
+                        start: self.position - 1,
+                        stop: self.position,
                     });
                 }
             }
@@ -975,8 +965,8 @@ impl Lexer {
 
                     return Err(LexerError {
                         message: "malformed binary number, expected 0, 1 or space".to_string(),
-                        start: self.get_position() - 1,
-                        stop: self.get_position(),
+                        start: self.position - 1,
+                        stop: self.position,
                     });
                 }
             }
@@ -989,7 +979,7 @@ impl Lexer {
 
     fn read_decimal_number(&mut self) -> Result<Option<TokenType>, LexerError> {
         if Syntax::is_number(self.get_current_char())
-            || (self.is_value(".", 0) && Syntax::is_number(self.get_byte_char_offset(1) as char))
+            || (self.is_value(".", 0) && Syntax::is_number(self.get_char_offset(1) as char))
         {
             let mut has_dot = false;
             if self.is_value(".", 0) {
@@ -1030,8 +1020,8 @@ impl Lexer {
 
                     return Err(LexerError {
                         message: "malformed decimal number".to_string(),
-                        start: self.get_position() - 1,
-                        stop: self.get_position(),
+                        start: self.position - 1,
+                        stop: self.position,
                     });
                 }
             }
@@ -1043,7 +1033,7 @@ impl Lexer {
 
     fn read_number(&mut self) -> Result<Option<TokenType>, LexerError> {
         if Syntax::is_number(self.get_current_char())
-            || (self.is_value(".", 0) && Syntax::is_number(self.get_byte_char_offset(1) as char))
+            || (self.is_value(".", 0) && Syntax::is_number(self.get_char_offset(1) as char))
         {
             if self.is_value("x", 1) || self.is_value("X", 1) {
                 return self.read_hex_number();
@@ -1058,7 +1048,7 @@ impl Lexer {
 
     fn read_multiline_string(&mut self) -> Result<Option<TokenType>, LexerError> {
         if self.is_value("[", 0) && (self.is_value("[", 1) || self.is_value("=", 1)) {
-            let start = self.get_position();
+            let start = self.position;
             self.advance(1);
 
             if self.is_value("=", 0) {
@@ -1074,36 +1064,36 @@ impl Lexer {
                 return Err(LexerError {
                     message: "malformed multiline string, expected =".to_string(),
                     start,
-                    stop: self.get_position(),
+                    stop: self.position,
                 });
             }
 
             self.advance(1);
 
-            let pos = self.get_position();
+            let pos = self.position;
 
             let closing = "]".to_string() + &("=").repeat(pos - start - 2) + "]";
 
             if let Some(pos2) = self.find_nearest(closing.as_str()) {
-                self.set_position(pos + pos2 + closing.len());
+                self.position = pos + pos2 + closing.len();
                 return Ok(Some(TokenType::MultilineComment));
             }
 
             return Err(LexerError {
                 message: "expected multiline string reached end of code".to_string(),
                 start,
-                stop: self.get_position(),
+                stop: self.position,
             });
         }
         Ok(None)
     }
 
     fn read_quoted_string(&mut self, quote: char) -> Result<Option<TokenType>, LexerError> {
-        if !self.is_byte(quote as u8, 0) {
+        if !self.is_char(quote, 0) {
             return Ok(None);
         }
 
-        let start = self.get_position();
+        let start = self.position;
         self.advance(1);
 
         while !self.the_end() {
@@ -1112,7 +1102,7 @@ impl Lexer {
             if char == '\\' {
                 let char = self.read_char();
 
-                if char == 'z' && !self.is_value(quote.to_string().as_str(), 0) {
+                if char == 'z' && !self.is_char(quote, 0) {
                     if let Err(err) = self.read_space() {
                         return Err(err);
                     }
@@ -1121,7 +1111,7 @@ impl Lexer {
                 return Err(LexerError {
                     message: "expected quote to end".to_string(),
                     start,
-                    stop: self.get_position(),
+                    stop: self.position,
                 });
             } else if char == quote {
                 return Ok(Some(TokenType::String));
@@ -1131,7 +1121,7 @@ impl Lexer {
         Err(LexerError {
             message: "expected quote to end: reached end of file".to_string(),
             start,
-            stop: self.get_position() - 1,
+            stop: self.position - 1,
         })
     }
 
@@ -1146,8 +1136,8 @@ impl Lexer {
 
 fn main() {
     let code = Code {
-        buffer: "5.6e3".to_string(),
-        name: "test".to_string(),
+        buffer: "5.6e3",
+        name: "test",
     };
 
     let mut runtime_syntax = lua_syntax();
@@ -1176,8 +1166,8 @@ fn main() {
 
 fn tokenize(code_string: &str) -> Vec<Token> {
     let code = Code {
-        buffer: code_string.to_string(),
-        name: "test".to_string(),
+        buffer: code_string,
+        name: "test",
     };
 
     let mut runtime_syntax = lua_syntax();
@@ -1228,8 +1218,8 @@ fn tokens_to_string(tokens: Vec<Token>) -> String {
 
 fn expect_error(code_string: &str, expected_error: &str) -> Vec<Token> {
     let code = Code {
-        buffer: code_string.to_string(),
-        name: "test".to_string(),
+        buffer: code_string,
+        name: "test",
     };
 
     let mut runtime_syntax = lua_syntax();
@@ -1380,6 +1370,6 @@ fn unknown_symbols() {
 
 #[test]
 fn debug_code() {
-    //assert_eq!(tokenize("§foo = true").len(), 2);
-    //assert_eq!(tokenize("£foo = true").len(), 2);
+    assert_eq!(one_token(tokenize("§foo = true")).kind, TokenType::AnalyzerDebugCode);
+    assert_eq!(one_token(tokenize("£foo = true")).kind, TokenType::ParserDebugCode);
 }
