@@ -991,13 +991,23 @@ impl Lexer {
         if Syntax::is_number(self.get_current_char())
             || (self.is_value(".", 0) && Syntax::is_number(self.get_byte_char_offset(1) as char))
         {
+            let mut has_dot = false;
             if self.is_value(".", 0) {
                 self.advance(1);
+                has_dot = true;
             }
 
             while !self.the_end() {
                 if self.is_value("_", 0) {
                     self.advance(1);
+                }
+
+                if !has_dot && self.is_value(".", 0) {
+                    if self.is_value(".", 1) {
+                        break;
+                    }
+                    self.advance(1);
+                    has_dot = true;
                 }
 
                 if Syntax::is_number(self.get_current_char()) {
@@ -1305,6 +1315,8 @@ fn number_annotations() {
     assert_eq!(tokenize("50ULL").len(), 2);
     assert_eq!(tokenize("50LL").len(), 2);
     assert_eq!(tokenize("50lL").len(), 2);
+    assert_eq!(tokenize("1.5e+20").len(), 2);
+    assert_eq!(tokenize(".0").len(), 2);
 }
 
 #[test]
@@ -1364,4 +1376,10 @@ fn typesystem_symbols() {
 #[test]
 fn unknown_symbols() {
     assert_eq!(tokenize("```").len(), 4);
+}
+
+#[test]
+fn debug_code() {
+    //assert_eq!(tokenize("§foo = true").len(), 2);
+    //assert_eq!(tokenize("£foo = true").len(), 2);
 }
