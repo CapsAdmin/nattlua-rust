@@ -1,3 +1,4 @@
+use std::fmt;
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum TokenType {
     AnalyzerDebugCode,
@@ -25,11 +26,17 @@ impl TokenType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub kind: TokenType,
     pub value: String,
     pub start: usize,
     pub stop: usize,
     pub whitespace: Vec<Token>,
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?} = {}", self.kind, self.value)
+    }
 }

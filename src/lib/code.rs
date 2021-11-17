@@ -3,7 +3,7 @@ pub struct Code<'a> {
     pub name: &'a str,
 }
 
-impl Code<'_> {
+impl<'a> Code<'a> {
     pub fn substring(&self, begin: usize, end: usize) -> &str {
         let start = std::cmp::min(begin, self.len());
         let stop = std::cmp::min(end, self.len());
@@ -19,6 +19,10 @@ impl Code<'_> {
         self.buffer.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
     pub fn get_char(&self, pos: usize) -> char {
         if pos >= self.len() {
             return 0 as char;
@@ -28,5 +32,9 @@ impl Code<'_> {
 
     pub fn find_nearest(&self, find: &str, from_index: usize) -> Option<usize> {
         self.buffer[from_index..].find(find)
+    }
+
+    pub fn new(buffer: &'a str, name: &'a str) -> Code<'a> {
+        Code { buffer, name }
     }
 }

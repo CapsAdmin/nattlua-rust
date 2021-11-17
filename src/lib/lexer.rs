@@ -1,16 +1,14 @@
 use crate::code::Code;
-use crate::syntax::Syntax;
+use crate::syntax::{lua_syntax, lua_typesystem_syntax, Syntax};
 use crate::token::{Token, TokenType};
-use std::{error::Error, fmt};
+use std::fmt;
 
 #[derive(Debug)]
-struct LexerError {
+pub struct LexerError {
     message: String,
     start: usize,
     stop: usize,
 }
-
-impl Error for LexerError {}
 
 impl fmt::Display for LexerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -18,7 +16,7 @@ impl fmt::Display for LexerError {
     }
 }
 
-struct Lexer<'a> {
+pub struct Lexer<'a> {
     pub code: Code<'a>,
     pub position: usize,
     pub runtime_syntax: Syntax,
@@ -74,8 +72,6 @@ impl Lexer<'_> {
     fn is_char(&self, char: char, offset: usize) -> bool {
         self.is_value(char.to_string().as_str(), offset)
     }
-
-    fn error(&self, message: &str, start: Option<usize>, stop: Option<usize>, args: Option<Vec<String>>) {}
 
     fn new_token(kind: TokenType, start: usize, stop: usize) -> Token {
         Token {
@@ -183,7 +179,7 @@ impl Lexer<'_> {
         }
     }
 
-    fn get_tokens(&mut self) -> (Vec<Token>, Vec<LexerError>) {
+    pub fn get_tokens(&mut self) -> (Vec<Token>, Vec<LexerError>) {
         self.reset_state();
 
         let mut tokens: Vec<Token> = Vec::new();
@@ -661,30 +657,26 @@ impl Lexer<'_> {
     fn read_double_quoted_string(&mut self) -> Result<Option<TokenType>, LexerError> {
         self.read_quoted_string('"')
     }
-}
 
+    pub fn new(code: Code) -> Lexer {
+        Lexer {
+            code,
+            position: 0,
+            runtime_syntax: lua_syntax(),
+            typesystem_syntax: lua_typesystem_syntax(),
+            comment_escape: false,
+        }
+    }
+}
+#[cfg(test)]
 mod tests {
     use crate::code::Code;
     use crate::lexer::Lexer;
-    use crate::syntax::{lua_syntax, lua_typesystem_syntax};
     use crate::token::{Token, TokenType};
 
-    fn tokenize(code_string: &str) -> Vec<Token> {
-        let code = Code {
-            buffer: code_string,
-            name: "test",
-        };
-
-        let runtime_syntax = lua_syntax();
-        let typesystem_syntax = lua_typesystem_syntax();
-
-        let mut lexer = Lexer {
-            code,
-            position: 0,
-            runtime_syntax,
-            typesystem_syntax,
-            comment_escape: false,
-        };
+    fn tokenize(contents: &str) -> Vec<Token> {
+        let code = Code::new(contents, "test");
+        let mut lexer = Lexer::new(code);
 
         let (tokens, errors) = lexer.get_tokens();
 
@@ -718,25 +710,9 @@ mod tests {
         result
     }
 
-    fn expect_error(code_string: &str, expected_error: &str) -> Vec<Token> {
-        let code = Code {
-            buffer: code_string,
-            name: "test",
-        };
-
-        let mut runtime_syntax = lua_syntax();
-        runtime_syntax.build();
-
-        let mut typesystem_syntax = lua_typesystem_syntax();
-        typesystem_syntax.build();
-
-        let mut lexer = Lexer {
-            code,
-            position: 0,
-            runtime_syntax,
-            typesystem_syntax,
-            comment_escape: false,
-        };
+    fn expect_error(contents: &str, expected_error: &str) -> Vec<Token> {
+        let code = Code::new(contents, "test");
+        let mut lexer = Lexer::new(code);
 
         let (tokens, errors) = lexer.get_tokens();
 
@@ -756,7 +732,7 @@ mod tests {
     }
 
     fn check(code: &str) {
-        let actual = tokens_to_string(tokenize(&code));
+        let actual = tokens_to_string(tokenize(code));
 
         assert_eq!(actual, code);
     }
