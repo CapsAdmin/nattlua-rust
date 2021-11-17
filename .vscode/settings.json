@@ -1,16 +1,16 @@
 {
-    "rust-analyzer.checkOnSave.command": "clippy",
-    "editor.formatOnSave": true,
-    "cSpell.words": [
-        "ÆØÅÆ",
-        "bnot",
-        "bxor",
-        "idiv",
-        "lshift",
-        "rshift",
-        "subsetof",
-        "supersetof",
-        "typesystem"
-    ],
-
+  "rust-analyzer.checkOnSave.command": "clippy",
+  "editor.formatOnSave": true,
+  "cSpell.words": [
+    "ÆØÅÆ",
+    "bnot",
+    "bxor",
+    "idiv",
+    "lshift",
+    "nattlua",
+    "rshift",
+    "subsetof",
+    "supersetof",
+    "typesystem"
+  ]
 }

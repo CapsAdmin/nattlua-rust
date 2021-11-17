@@ -1,59 +1,7 @@
-#![allow(dead_code)]
-use core::cmp::Reverse;
-use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use crate::code::Code;
+use crate::syntax::Syntax;
+use crate::token::{Token, TokenType};
 use std::{error::Error, fmt};
-
-macro_rules! string_vec {
-    ($($x:expr),*) => (vec![$($x.to_string()),*]);
-}
-
-macro_rules! hashmap(
-    { $($key:expr => $value:expr),+ } => {
-        {
-            let mut m = ::std::collections::HashMap::new();
-            $(
-                m.insert($key.to_string(), $value.to_string());
-            )+
-            m
-        }
-     };
-);
-
-#[derive(Eq, PartialEq, Debug)]
-pub enum AnnotationType {
-    Hex,
-    Decimal,
-    Binary,
-}
-
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub enum TokenType {
-    AnalyzerDebugCode,
-    ParserDebugCode,
-    Letter,
-    String,
-    Number,
-    Symbol,
-    EndOfFile, // sort of whitespace
-    Shebang,   // sort of whitespace
-    Discard,
-    Unknown,
-
-    LineComment,
-    MultilineComment,
-    CommentEscape,
-    Space,
-}
-
-impl TokenType {
-    pub fn is_whitespace(&self) -> bool {
-        matches!(
-            self,
-            TokenType::LineComment | TokenType::MultilineComment | TokenType::CommentEscape | TokenType::Space
-        )
-    }
-}
 
 #[derive(Debug)]
 struct LexerError {
@@ -70,384 +18,12 @@ impl fmt::Display for LexerError {
     }
 }
 
-#[derive(Clone)]
-struct Token {
-    kind: TokenType,
-    value: String,
-    start: usize,
-    stop: usize,
-    whitespace: Vec<Token>,
-}
-
-struct BinaryOperatorInfo {
-    left_priority: usize,
-    right_priority: usize,
-}
-
-struct Syntax {
-    symbols: Vec<String>,
-    lookup: HashMap<String, Vec<String>>,
-    binary_operator_info: HashMap<String, BinaryOperatorInfo>,
-    primary_binary_operators_lookup: HashSet<String>,
-    prefix_operators_lookup: HashSet<String>,
-    postfix_operators_lookup: HashSet<String>,
-    keyword_values_lookup: HashSet<String>,
-    keyword_lookup: HashSet<String>,
-    non_standard_keyword_lookup: HashSet<String>,
-    hex_map: HashSet<String>,
-
-    symbol_characters: Vec<String>,
-    number_annotations: Vec<String>,
-    keywords: Vec<String>,
-    non_standard_keywords: Vec<String>,
-    keyword_values: Vec<String>,
-    prefix_operators: Vec<String>,
-    postfix_operators: Vec<String>,
-    binary_operators: Vec<Vec<String>>,
-    primary_binary_operators: Vec<String>,
-    binary_operator_function_translate: HashMap<String, String>,
-    postfix_operator_function_translate: HashMap<String, String>,
-    prefix_operator_function_translate: HashMap<String, String>,
-}
-
-impl Syntax {
-    fn add_symbols(symbols: &mut Vec<String>, strings: &[String]) {
-        let re = Regex::new(r"[^\p{L}\d\s@#]").unwrap();
-
-        for symbol in strings {
-            if re.is_match(symbol.as_str()) {
-                symbols.push(symbol.to_string());
-            }
-        }
-    }
-
-    fn add_binary_symbols(symbols: &mut Vec<String>, strings: &[Vec<String>]) {
-        for string_vec in strings {
-            for string in string_vec {
-                if let Some(stripped) = string.strip_prefix('R') {
-                    symbols.push(stripped.to_string());
-                } else {
-                    symbols.push(string.to_string());
-                }
-            }
-        }
-    }
-
-    fn is_letter(c: char) -> bool {
-        ('a'..='z').contains(&c) || ('A'..='Z').contains(&c) || c == '_' || c == '@' || c >= 127u8 as char
-    }
-
-    fn is_during_letter(c: char) -> bool {
-        ('a'..='z').contains(&c)
-            || ('0'..='9').contains(&c)
-            || ('A'..='Z').contains(&c)
-            || c == '_'
-            || c == '@'
-            || c >= 127u8 as char
-    }
-
-    fn is_number(c: char) -> bool {
-        ('0'..='9').contains(&c)
-    }
-
-    fn is_space(c: char) -> bool {
-        c > 0u8 as char && c <= 32u8 as char
-    }
-
-    fn is_symbol(c: char) -> bool {
-        c != '_'
-            && (('!'..='/').contains(&c)
-                || (':'..='?').contains(&c)
-                || ('['..='`').contains(&c)
-                || ('{'..='~').contains(&c))
-    }
-
-    fn is_valid_hex(&self, c: char) -> bool {
-        self.hex_map.contains(&c.to_string())
-    }
-
-    fn is_primary_binary_operator(&self, token: &Token) -> bool {
-        self.primary_binary_operators_lookup.contains(&token.value)
-    }
-
-    fn is_prefix_operator(&self, token: &Token) -> bool {
-        self.prefix_operators_lookup.contains(&token.value)
-    }
-
-    fn is_postfix_operator(&self, token: &Token) -> bool {
-        self.postfix_operators_lookup.contains(&token.value)
-    }
-
-    fn is_keyword(&self, token: &Token) -> bool {
-        self.keyword_lookup.contains(&token.value)
-    }
-
-    fn is_non_standard_keyword(&self, token: &Token) -> bool {
-        self.non_standard_keyword_lookup.contains(&token.value)
-    }
-
-    fn is_keyword_value(&self, token: &Token) -> bool {
-        self.keyword_values_lookup.contains(&token.value)
-    }
-
-    fn get_operator_info(&self, token: &Token) -> &BinaryOperatorInfo {
-        self.binary_operator_info.get(&token.value).unwrap()
-    }
-
-    pub fn build(&mut self) {
-        {
-            Self::add_binary_symbols(&mut self.symbols, &self.binary_operators);
-            Self::add_symbols(&mut self.symbols, &self.symbol_characters);
-            Self::add_symbols(&mut self.symbols, &self.keywords);
-            Self::add_symbols(&mut self.symbols, &self.keyword_values);
-            Self::add_symbols(&mut self.symbols, &self.prefix_operators);
-            Self::add_symbols(&mut self.symbols, &self.postfix_operators);
-            Self::add_symbols(&mut self.symbols, &self.primary_binary_operators);
-
-            self.symbols.sort_by_key(|b| Reverse(b.len()))
-        }
-
-        {
-            let re = Regex::new(r"(.*)A(.*)B(.*)").unwrap();
-            for (key, val) in &self.binary_operator_function_translate {
-                let caps = re.captures(val).unwrap();
-
-                let left = caps.get(1).map_or("", |m| m.as_str()).to_string();
-                let mid = caps.get(2).map_or("", |m| m.as_str()).to_string();
-                let right = caps.get(3).map_or("", |m| m.as_str()).to_string();
-
-                self.lookup.insert(
-                    key.to_string(),
-                    [" ".to_string() + &left, mid, " ".to_string() + &right].to_vec(),
-                );
-            }
-        }
-
-        {
-            let re = Regex::new(r"(.*)A(.*)").unwrap();
-            for (key, val) in &self.prefix_operator_function_translate {
-                let caps = re.captures(val).unwrap();
-
-                let left = caps.get(1).map_or("", |m| m.as_str()).to_string();
-                let right = caps.get(2).map_or("", |m| m.as_str()).to_string();
-
-                self.lookup.insert(
-                    key.to_string(),
-                    [" ".to_string() + &left, " ".to_string() + &right].to_vec(),
-                );
-            }
-        }
-
-        {
-            let re = Regex::new(r"(.*)A(.*)").unwrap();
-            for (key, val) in &self.postfix_operator_function_translate {
-                let caps = re.captures(val).unwrap();
-
-                let left = caps.get(1).map_or("", |m| m.as_str()).to_string();
-                let right = caps.get(2).map_or("", |m| m.as_str()).to_string();
-
-                self.lookup.insert(
-                    key.to_string(),
-                    [" ".to_string() + &left, " ".to_string() + &right].to_vec(),
-                );
-            }
-        }
-
-        {
-            for (priority, group) in self.binary_operators.iter().enumerate() {
-                for token in group {
-                    if let Some(stripped) = token.strip_prefix('R') {
-                        self.binary_operator_info.insert(
-                            stripped.to_string(),
-                            BinaryOperatorInfo {
-                                left_priority: priority + 1,
-                                right_priority: priority,
-                            },
-                        );
-                    } else {
-                        self.binary_operator_info.insert(
-                            token.to_string(),
-                            BinaryOperatorInfo {
-                                left_priority: priority,
-                                right_priority: priority,
-                            },
-                        );
-                    }
-                }
-            }
-        }
-
-        for key in &self.primary_binary_operators {
-            self.primary_binary_operators_lookup.insert(key.to_string());
-        }
-
-        for key in &self.prefix_operators {
-            self.prefix_operators_lookup.insert(key.to_string());
-        }
-
-        for key in &self.postfix_operators {
-            self.postfix_operators_lookup.insert(key.to_string());
-        }
-
-        for key in &self.keyword_values {
-            self.keyword_values_lookup.insert(key.to_string());
-        }
-
-        for key in &self.keyword_values {
-            self.keyword_lookup.insert(key.to_string());
-        }
-
-        for key in &self.non_standard_keywords {
-            self.non_standard_keyword_lookup.insert(key.to_string());
-        }
-
-        for key in [
-            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "A", "B", "C", "D", "E",
-            "F",
-        ] {
-            self.hex_map.insert(key.to_string());
-        }
-    }
-}
-
-fn lua_syntax() -> Syntax {
-    Syntax {
-        symbols: string_vec![],
-        lookup: HashMap::new(),
-        binary_operator_info: HashMap::new(),
-        primary_binary_operators_lookup: HashSet::new(),
-        prefix_operators_lookup: HashSet::new(),
-        postfix_operators_lookup: HashSet::new(),
-        keyword_values_lookup: HashSet::new(),
-        keyword_lookup: HashSet::new(),
-        non_standard_keyword_lookup: HashSet::new(),
-        hex_map: HashSet::new(),
-
-        symbol_characters: string_vec![",", ";", "(", ")", "{", "}", "[", "]", "=", "::", '"', "'", "<|", "|>"],
-        number_annotations: string_vec!["ull", "ll", "ul", "i"],
-        keywords: string_vec![
-            "do", "end", "if", "then", "else", "elseif", "for", "in", "while", "repeat", "until", "break", "return",
-            "local", "function", "and", "not", "or", // these are just to make sure all code is covered by tests
-            "ÆØÅ", "ÆØÅÆ"
-        ],
-        non_standard_keywords: string_vec!["continue", "import", "literal", "mutable"],
-        keyword_values: string_vec!["...", "nil", "true", "false"],
-        prefix_operators: string_vec!["-", "#", "not", "!", "~", "supertype"],
-        postfix_operators: string_vec![
-            // these are just to make sure all code is covered by tests
-            "++", "ÆØÅ", "ÆØÅÆ"
-        ],
-        binary_operators: vec![
-            string_vec!["or", "||"],
-            string_vec!["and", "&&"],
-            string_vec!["<", ">", "<=", ">=", "~=", "==", "!="],
-            string_vec!["|"],
-            string_vec!["~"],
-            string_vec!["&"],
-            string_vec!["<<", ">>"],
-            string_vec!["R.."], // right associative
-            string_vec!["+", "-"],
-            string_vec!["*", "/", "/idiv/", "%"],
-            string_vec!["R^"], // right associative
-        ],
-        primary_binary_operators: string_vec![".", ":"],
-        binary_operator_function_translate: hashmap![
-            ">>" => "bit.rshift(A, B)",
-            "<<" => "bit.lshift(A, B)",
-            "|" => "bit.bor(A, B)",
-            "&" => "bit.band(A, B)",
-            "//" => "math.floor(A / B)",
-            "~" => "bit.bxor(A, B)"
-        ],
-        prefix_operator_function_translate: hashmap![
-            "~" => "bit.bnot(A)"
-        ],
-        postfix_operator_function_translate: hashmap![
-            "++" => "A = A + 1",
-            "ÆØÅ" => "(A)",
-            "ÆØÅÆ" => "(A)"
-        ],
-    }
-}
-
-fn lua_typesystem_syntax() -> Syntax {
-    let mut syntax = lua_syntax();
-
-    syntax.prefix_operators = string_vec![
-        "-",
-        "#",
-        "not",
-        "~",
-        "typeof",
-        "$",
-        "unique",
-        "mutable",
-        "literal",
-        "supertype",
-        "expand"
-    ];
-
-    syntax.primary_binary_operators = string_vec!["."];
-
-    syntax.binary_operators = vec![
-        string_vec!["or"],
-        string_vec!["and"],
-        string_vec!["extends"],
-        string_vec!["subsetof"],
-        string_vec!["supersetof"],
-        string_vec!["<", ">", "<=", ">=", "~=", "=="],
-        string_vec!["|"],
-        string_vec!["~"],
-        string_vec!["&"],
-        string_vec!["<<", ">>"],
-        string_vec!["R.."],
-        string_vec!["+", "-"],
-        string_vec!["*", "/", "/idiv/", "%"],
-        string_vec!["R^"],
-    ];
-
-    syntax
-}
-
-struct Code<'a> {
-    buffer: &'a str,
-    name: &'a str,
-}
-
-impl Code<'_> {
-    fn substring(&self, begin: usize, end: usize) -> &str {
-        let start = std::cmp::min(begin, self.len());
-        let stop = std::cmp::min(end, self.len());
-
-        if self.buffer.is_char_boundary(start) && self.buffer.is_char_boundary(stop) {
-            return &self.buffer[start..stop];
-        }
-
-        ""
-    }
-
-    fn len(&self) -> usize {
-        self.buffer.len()
-    }
-
-    fn get_char(&self, pos: usize) -> char {
-        if pos >= self.len() {
-            return 0 as char;
-        }
-        self.buffer.as_bytes()[pos] as char
-    }
-
-    fn find_nearest(&self, find: &str, from_index: usize) -> Option<usize> {
-        self.buffer[from_index..].find(find)
-    }
-}
-
 struct Lexer<'a> {
-    code: Code<'a>,
-    position: usize,
-    runtime_syntax: Syntax,
-    typesystem_syntax: Syntax,
-    comment_escape: bool,
+    pub code: Code<'a>,
+    pub position: usize,
+    pub runtime_syntax: Syntax,
+    pub typesystem_syntax: Syntax,
+    pub comment_escape: bool,
 }
 
 impl Lexer<'_> {
@@ -1086,215 +662,218 @@ impl Lexer<'_> {
         self.read_quoted_string('"')
     }
 }
-fn main() {}
 
-fn tokenize(code_string: &str) -> Vec<Token> {
-    let code = Code {
-        buffer: code_string,
-        name: "test",
-    };
+mod tests {
+    use crate::code::Code;
+    use crate::lexer::Lexer;
+    use crate::syntax::{lua_syntax, lua_typesystem_syntax};
+    use crate::token::{Token, TokenType};
 
-    let mut runtime_syntax = lua_syntax();
-    runtime_syntax.build();
+    fn tokenize(code_string: &str) -> Vec<Token> {
+        let code = Code {
+            buffer: code_string,
+            name: "test",
+        };
 
-    let mut typesystem_syntax = lua_typesystem_syntax();
-    typesystem_syntax.build();
+        let runtime_syntax = lua_syntax();
+        let typesystem_syntax = lua_typesystem_syntax();
 
-    let mut lexer = Lexer {
-        code,
-        position: 0,
-        runtime_syntax,
-        typesystem_syntax,
-        comment_escape: false,
-    };
+        let mut lexer = Lexer {
+            code,
+            position: 0,
+            runtime_syntax,
+            typesystem_syntax,
+            comment_escape: false,
+        };
 
-    let (tokens, errors) = lexer.get_tokens();
+        let (tokens, errors) = lexer.get_tokens();
 
-    for error in &errors {
-        println!("{}", error);
-    }
-
-    tokens
-}
-
-fn one_token(tokens: Vec<Token>) -> Token {
-    if tokens.len() != 2 {
-        panic!("expected 1 token, got {}", tokens.len());
-    }
-
-    assert_eq!(tokens[1].kind, TokenType::EndOfFile);
-
-    tokens[0].clone()
-}
-
-fn tokens_to_string(tokens: Vec<Token>) -> String {
-    let mut result = String::new();
-
-    for token in &tokens {
-        for whitespace_token in &token.whitespace {
-            result.push_str(&whitespace_token.value);
+        for error in &errors {
+            println!("{}", error);
         }
-        result.push_str(&token.value);
+
+        tokens
     }
 
-    result
-}
-
-fn expect_error(code_string: &str, expected_error: &str) -> Vec<Token> {
-    let code = Code {
-        buffer: code_string,
-        name: "test",
-    };
-
-    let mut runtime_syntax = lua_syntax();
-    runtime_syntax.build();
-
-    let mut typesystem_syntax = lua_typesystem_syntax();
-    typesystem_syntax.build();
-
-    let mut lexer = Lexer {
-        code,
-        position: 0,
-        runtime_syntax,
-        typesystem_syntax,
-        comment_escape: false,
-    };
-
-    let (tokens, errors) = lexer.get_tokens();
-
-    for error in &errors {
-        if error.message.contains(expected_error) {
-            return tokens;
+    fn one_token(tokens: Vec<Token>) -> Token {
+        if tokens.len() != 2 {
+            panic!("expected 1 token, got {}", tokens.len());
         }
+
+        assert_eq!(tokens[1].kind, TokenType::EndOfFile);
+
+        tokens[0].clone()
     }
 
-    println!("could not find error {} got these instead:", expected_error);
+    fn tokens_to_string(tokens: Vec<Token>) -> String {
+        let mut result = String::new();
 
-    for error in &errors {
-        println!("\t{}", error);
+        for token in &tokens {
+            for whitespace_token in &token.whitespace {
+                result.push_str(&whitespace_token.value);
+            }
+            result.push_str(&token.value);
+        }
+
+        result
     }
 
-    panic!("expected error, got no errors");
-}
+    fn expect_error(code_string: &str, expected_error: &str) -> Vec<Token> {
+        let code = Code {
+            buffer: code_string,
+            name: "test",
+        };
 
-fn check(code: &str) {
-    let actual = tokens_to_string(tokenize(&code));
+        let mut runtime_syntax = lua_syntax();
+        runtime_syntax.build();
 
-    assert_eq!(actual, code);
-}
+        let mut typesystem_syntax = lua_typesystem_syntax();
+        typesystem_syntax.build();
 
-#[test]
-fn tokens_to_string_test() {
-    check("local foo =   5 + 2..2");
-}
+        let mut lexer = Lexer {
+            code,
+            position: 0,
+            runtime_syntax,
+            typesystem_syntax,
+            comment_escape: false,
+        };
 
-#[test]
-fn unclosed_multiline_comment() {
-    assert_eq!(tokenize("")[0].kind, TokenType::EndOfFile);
-    assert_eq!(one_token(tokenize("a")).kind, TokenType::Letter);
-    assert_eq!(one_token(tokenize("1")).kind, TokenType::Number);
-    assert_eq!(one_token(tokenize("(")).kind, TokenType::Symbol);
-}
+        let (tokens, errors) = lexer.get_tokens();
 
-#[test]
-fn shebang() {
-    assert_eq!(tokenize("#!/usr/bin/env lua")[0].kind, TokenType::Shebang);
-}
+        for error in &errors {
+            if error.message.contains(expected_error) {
+                return tokens;
+            }
+        }
 
-#[test]
-fn single_quote_string() {
-    assert_eq!(one_token(tokenize("'1'")).kind, TokenType::String);
-}
+        println!("could not find error {} got these instead:", expected_error);
 
-#[test]
-fn z_escaped_string() {
-    assert_eq!(one_token(tokenize("\"a\\z\na\"")).kind, TokenType::String);
-}
+        for error in &errors {
+            println!("\t{}", error);
+        }
 
-#[test]
-fn number_range() {
-    assert_eq!(tokenize("1..20").len(), 4);
-}
-#[test]
-fn number_delimiter() {
-    assert_eq!(tokenize("1_000_000").len(), 2);
-    assert_eq!(tokenize("0xdead_beef").len(), 2);
-    assert_eq!(tokenize("0b0101_0101").len(), 2);
-}
+        panic!("expected error, got no errors");
+    }
 
-#[test]
-fn number_annotations() {
-    assert_eq!(tokenize("50ull").len(), 2);
-    assert_eq!(tokenize("50uLL").len(), 2);
-    assert_eq!(tokenize("50ULL").len(), 2);
-    assert_eq!(tokenize("50LL").len(), 2);
-    assert_eq!(tokenize("50lL").len(), 2);
-    assert_eq!(tokenize("1.5e+20").len(), 2);
-    assert_eq!(tokenize(".0").len(), 2);
-}
+    fn check(code: &str) {
+        let actual = tokens_to_string(tokenize(&code));
 
-#[test]
-fn malformed_number() {
-    expect_error("12LOL", "malformed decimal number");
-    expect_error("0xbLOL", "malformed hex number");
-    expect_error("0b101LOL01", "malformed binary number");
-    expect_error("1.5eD", "after 'exponent'");
-    expect_error("1.5e+D", "malformed exponent expected number, got D");
-}
+        assert_eq!(actual, code);
+    }
 
-#[test]
-fn multiline_comment_error() {
-    expect_error("/*", "tried to find end of multiline c comment");
-    expect_error("--[[", "unclosed multiline comment");
-}
+    #[test]
+    fn tokens_to_string_test() {
+        check("local foo =   5 + 2..2");
+    }
 
-#[test]
-fn string_error() {
-    expect_error("\"woo\nfoo", "expected quote to end");
-    expect_error("'aaa", "expected quote to end: reached end of file");
-}
+    #[test]
+    fn unclosed_multiline_comment() {
+        assert_eq!(tokenize("")[0].kind, TokenType::EndOfFile);
+        assert_eq!(one_token(tokenize("a")).kind, TokenType::Letter);
+        assert_eq!(one_token(tokenize("1")).kind, TokenType::Number);
+        assert_eq!(one_token(tokenize("(")).kind, TokenType::Symbol);
+    }
 
-#[test]
-fn multiline_string() {
-    assert_eq!(tokenize("a = [[a]]").len(), 3);
-    assert_eq!(tokenize("a = [=[a]=]").len(), 3);
-    assert_eq!(tokenize("a = [==[a]==]").len(), 3);
+    #[test]
+    fn shebang() {
+        assert_eq!(tokenize("#!/usr/bin/env lua")[0].kind, TokenType::Shebang);
+    }
 
-    expect_error("a = [=a", "malformed multiline string");
-    expect_error("a = [[a", "expected multiline string reached end of code");
-}
+    #[test]
+    fn single_quote_string() {
+        assert_eq!(one_token(tokenize("'1'")).kind, TokenType::String);
+    }
 
-#[test]
-fn multiline_comment() {
-    assert_eq!(tokenize("--[[a]]")[0].kind, TokenType::EndOfFile);
-    assert_eq!(tokenize("--[=[a]=]")[0].kind, TokenType::EndOfFile);
-    assert_eq!(tokenize("--[==[a]==]")[0].kind, TokenType::EndOfFile);
-    assert_eq!(tokenize("/*a*/")[0].kind, TokenType::EndOfFile);
-}
+    #[test]
+    fn z_escaped_string() {
+        assert_eq!(one_token(tokenize("\"a\\z\na\"")).kind, TokenType::String);
+    }
 
-#[test]
-fn line_comment() {
-    assert_eq!(tokenize("-- a")[0].kind, TokenType::EndOfFile);
-    assert_eq!(tokenize("// a")[0].kind, TokenType::EndOfFile);
-    assert_eq!(tokenize("--[= a")[0].kind, TokenType::EndOfFile);
-}
+    #[test]
+    fn number_range() {
+        assert_eq!(tokenize("1..20").len(), 4);
+    }
+    #[test]
+    fn number_delimiter() {
+        assert_eq!(tokenize("1_000_000").len(), 2);
+        assert_eq!(tokenize("0xdead_beef").len(), 2);
+        assert_eq!(tokenize("0b0101_0101").len(), 2);
+    }
 
-#[test]
-fn comment_escape() {
-    assert_eq!(one_token(tokenize("--[[# 1337 ]]")).kind, TokenType::Number);
-}
+    #[test]
+    fn number_annotations() {
+        assert_eq!(tokenize("50ull").len(), 2);
+        assert_eq!(tokenize("50uLL").len(), 2);
+        assert_eq!(tokenize("50ULL").len(), 2);
+        assert_eq!(tokenize("50LL").len(), 2);
+        assert_eq!(tokenize("50lL").len(), 2);
+        assert_eq!(tokenize("1.5e+20").len(), 2);
+        assert_eq!(tokenize(".0").len(), 2);
+    }
 
-#[test]
-fn typesystem_symbols() {
-    assert_eq!(tokenize("$'foo'").len(), 3);
-}
-#[test]
-fn unknown_symbols() {
-    assert_eq!(tokenize("```").len(), 4);
-}
+    #[test]
+    fn malformed_number() {
+        expect_error("12LOL", "malformed decimal number");
+        expect_error("0xbLOL", "malformed hex number");
+        expect_error("0b101LOL01", "malformed binary number");
+        expect_error("1.5eD", "after 'exponent'");
+        expect_error("1.5e+D", "malformed exponent expected number, got D");
+    }
 
-#[test]
-fn debug_code() {
-    assert_eq!(one_token(tokenize("§foo = true")).kind, TokenType::AnalyzerDebugCode);
-    assert_eq!(one_token(tokenize("£foo = true")).kind, TokenType::ParserDebugCode);
+    #[test]
+    fn multiline_comment_error() {
+        expect_error("/*", "tried to find end of multiline c comment");
+        expect_error("--[[", "unclosed multiline comment");
+    }
+
+    #[test]
+    fn string_error() {
+        expect_error("\"woo\nfoo", "expected quote to end");
+        expect_error("'aaa", "expected quote to end: reached end of file");
+    }
+
+    #[test]
+    fn multiline_string() {
+        assert_eq!(tokenize("a = [[a]]").len(), 3);
+        assert_eq!(tokenize("a = [=[a]=]").len(), 3);
+        assert_eq!(tokenize("a = [==[a]==]").len(), 3);
+
+        expect_error("a = [=a", "malformed multiline string");
+        expect_error("a = [[a", "expected multiline string reached end of code");
+    }
+
+    #[test]
+    fn multiline_comment() {
+        assert_eq!(tokenize("--[[a]]")[0].kind, TokenType::EndOfFile);
+        assert_eq!(tokenize("--[=[a]=]")[0].kind, TokenType::EndOfFile);
+        assert_eq!(tokenize("--[==[a]==]")[0].kind, TokenType::EndOfFile);
+        assert_eq!(tokenize("/*a*/")[0].kind, TokenType::EndOfFile);
+    }
+
+    #[test]
+    fn line_comment() {
+        assert_eq!(tokenize("-- a")[0].kind, TokenType::EndOfFile);
+        assert_eq!(tokenize("// a")[0].kind, TokenType::EndOfFile);
+        assert_eq!(tokenize("--[= a")[0].kind, TokenType::EndOfFile);
+    }
+
+    #[test]
+    fn comment_escape() {
+        assert_eq!(one_token(tokenize("--[[# 1337 ]]")).kind, TokenType::Number);
+    }
+
+    #[test]
+    fn typesystem_symbols() {
+        assert_eq!(tokenize("$'foo'").len(), 3);
+    }
+    #[test]
+    fn unknown_symbols() {
+        assert_eq!(tokenize("```").len(), 4);
+    }
+
+    #[test]
+    fn debug_code() {
+        assert_eq!(one_token(tokenize("§foo = true")).kind, TokenType::AnalyzerDebugCode);
+        assert_eq!(one_token(tokenize("£foo = true")).kind, TokenType::ParserDebugCode);
+    }
 }
