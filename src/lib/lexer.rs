@@ -247,12 +247,12 @@ impl Lexer<'_> {
 
     fn read_symbol(&mut self) -> Result<Option<TokenType>, LexerError> {
         // TODO: avoid clone
-        if self.read_from_array(self.runtime_syntax.symbols.clone()) {
+        if self.read_from_array(self.runtime_syntax.symbols()) {
             return Ok(Some(TokenType::Symbol));
         }
 
         // TODO: avoid clone
-        if self.read_from_array(self.typesystem_syntax.symbols.clone()) {
+        if self.read_from_array(self.typesystem_syntax.symbols()) {
             return Ok(Some(TokenType::Symbol));
         }
         Ok(None)
@@ -466,7 +466,7 @@ impl Lexer<'_> {
                 }
             }
 
-            self.read_from_array(self.runtime_syntax.number_annotations.clone());
+            self.read_from_array(self.runtime_syntax.number_annotations());
 
             return Ok(Some(TokenType::Number));
         }
@@ -491,7 +491,7 @@ impl Lexer<'_> {
                         break;
                     }
 
-                    if self.read_from_array(self.runtime_syntax.number_annotations.clone()) {
+                    if self.read_from_array(self.runtime_syntax.number_annotations()) {
                         break;
                     }
 
@@ -546,7 +546,7 @@ impl Lexer<'_> {
                         break;
                     }
 
-                    if self.read_from_array(self.runtime_syntax.number_annotations.clone()) {
+                    if self.read_from_array(self.runtime_syntax.number_annotations()) {
                         break;
                     }
 
@@ -743,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn unclosed_multiline_comment() {
+    fn smoke() {
         assert_eq!(tokenize("")[0].kind, TokenType::EndOfFile);
         assert_eq!(one_token(tokenize("a")).kind, TokenType::Letter);
         assert_eq!(one_token(tokenize("1")).kind, TokenType::Number);
