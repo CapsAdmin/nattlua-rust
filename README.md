@@ -2,7 +2,8 @@ This is meant to be a rust implementation of https://github.com/CapsAdmin/NattLu
 
 `cargo run main.lua`
 
-#development 
+#development
+
 `cargo test`
 `nodemon --watch src -e rs --exec cargo test`
 `cargo tarpaulin -o Html`
