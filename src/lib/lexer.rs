@@ -1,5 +1,6 @@
 use crate::code::Code;
-use crate::syntax::{lua_syntax, lua_typesystem_syntax, Syntax};
+use crate::lua_syntax::{runtime_syntax, typesystem_syntax};
+use crate::syntax::Syntax;
 use crate::token::{Token, TokenType};
 use std::fmt;
 
@@ -24,53 +25,50 @@ pub struct Lexer<'a> {
     pub comment_escape: bool,
 }
 
+type TokenResult = Result<Option<TokenType>, LexerError>;
+
 impl Lexer<'_> {
-    fn get_length(&self) -> usize {
+    fn len(&self) -> usize {
         self.code.len()
     }
 
     fn get_string(&self, start: usize, stop: usize) -> &str {
-        self.code.substring(start, stop)
+        self.code.get_string(start, stop)
     }
 
-    fn get_char_offset(&self, offset: usize) -> char {
-        self.code.get_char(self.position + offset)
+    fn char_offset(&self, relative_offset: usize) -> char {
+        self.code.get_char(self.position + relative_offset)
     }
 
-    fn get_current_char(&self) -> char {
-        self.get_char_offset(0) as char
+    fn is_string(&self, value: &str, relative_offset: usize) -> bool {
+        let l = self.get_string(
+            self.position + relative_offset,
+            self.position + relative_offset + value.len(),
+        );
+
+        l == value
     }
 
-    fn reset_state(&mut self) -> &mut Self {
+    fn reset_state(&mut self) {
         self.position = 0;
-        self
     }
 
     fn find_nearest(&self, str: &str) -> Option<usize> {
         self.code.find_nearest(str, self.position)
     }
 
-    fn advance(&mut self, offset: usize) -> &mut Self {
+    fn advance(&mut self, offset: usize) {
         self.position += offset;
-        self
     }
 
     fn read_char(&mut self) -> char {
-        let char = self.get_current_char();
+        let char = self.char_offset(0);
         self.advance(1);
         char
     }
+
     fn the_end(&self) -> bool {
-        self.position >= self.get_length()
-    }
-
-    fn is_value(&self, value: &str, offset: usize) -> bool {
-        let l = self.get_string(self.position + offset, self.position + offset + value.len());
-
-        l == value
-    }
-    fn is_char(&self, char: char, offset: usize) -> bool {
-        self.is_value(char.to_string().as_str(), offset)
+        self.position >= self.len()
     }
 
     fn new_token(kind: TokenType, start: usize, stop: usize) -> Token {
@@ -97,7 +95,7 @@ impl Lexer<'_> {
         false
     }
 
-    fn read_whitespace(&mut self) -> Result<Option<TokenType>, LexerError> {
+    fn read_whitespace(&mut self) -> TokenResult {
         self.read_space()
             .transpose()
             .or_else(|| self.read_comment_escape().transpose())
@@ -108,7 +106,7 @@ impl Lexer<'_> {
             .transpose()
     }
 
-    fn read_non_whitespace(&mut self) -> Result<Option<TokenType>, LexerError> {
+    fn read_non_whitespace(&mut self) -> TokenResult {
         self.read_analyzer_debug_code()
             .transpose()
             .or_else(|| self.read_parser_debug_code().transpose())
@@ -121,12 +119,12 @@ impl Lexer<'_> {
             .transpose()
     }
 
-    fn read_unknown(&mut self) -> Result<Option<TokenType>, LexerError> {
+    fn read_unknown(&mut self) -> TokenResult {
         self.advance(1);
         Ok(Some(TokenType::Unknown))
     }
 
-    fn read_the_end(&mut self) -> Result<Option<TokenType>, LexerError> {
+    fn read_the_end(&mut self) -> TokenResult {
         if self.the_end() {
             return Ok(Some(TokenType::EndOfFile));
         }
@@ -201,51 +199,55 @@ impl Lexer<'_> {
         (tokens, errors)
     }
 
-    fn read_shebang(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.position == 0 && self.is_value("#", 0) {
-            while !self.the_end() {
-                self.advance(1);
-
-                if self.is_value("\n", 0) {
-                    break;
-                }
-            }
-            return Ok(Some(TokenType::Shebang));
+    fn read_shebang(&mut self) -> TokenResult {
+        if self.position != 0 || !self.is_string("#", 0) {
+            return Ok(None);
         }
 
-        Ok(None)
-    }
+        while !self.the_end() {
+            self.advance(1);
 
-    fn read_space(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if Syntax::is_space(self.get_current_char()) {
-            while !self.the_end() {
-                self.advance(1);
-
-                if !Syntax::is_space(self.get_current_char()) {
-                    break;
-                }
+            if self.is_string("\n", 0) {
+                break;
             }
-
-            return Ok(Some(TokenType::Space));
         }
-        Ok(None)
-    }
-    fn read_letter(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if Syntax::is_letter(self.get_current_char()) {
-            while !self.the_end() {
-                self.advance(1);
 
-                if !Syntax::is_during_letter(self.get_current_char()) {
-                    break;
-                }
+        Ok(Some(TokenType::Shebang))
+    }
+
+    fn read_space(&mut self) -> TokenResult {
+        if !Syntax::is_space(self.char_offset(0)) {
+            return Ok(None);
+        }
+
+        while !self.the_end() {
+            self.advance(1);
+
+            if !Syntax::is_space(self.char_offset(0)) {
+                break;
             }
-
-            return Ok(Some(TokenType::Letter));
         }
-        Ok(None)
+
+        Ok(Some(TokenType::Space))
     }
 
-    fn read_symbol(&mut self) -> Result<Option<TokenType>, LexerError> {
+    fn read_letter(&mut self) -> TokenResult {
+        if !Syntax::is_letter(self.char_offset(0)) {
+            return Ok(None);
+        }
+
+        while !self.the_end() {
+            self.advance(1);
+
+            if !Syntax::is_during_letter(self.char_offset(0)) {
+                break;
+            }
+        }
+
+        Ok(Some(TokenType::Letter))
+    }
+
+    fn read_symbol(&mut self) -> TokenResult {
         // TODO: avoid clone
         if self.read_from_array(self.runtime_syntax.symbols()) {
             return Ok(Some(TokenType::Symbol));
@@ -255,154 +257,159 @@ impl Lexer<'_> {
         if self.read_from_array(self.typesystem_syntax.symbols()) {
             return Ok(Some(TokenType::Symbol));
         }
+
         Ok(None)
     }
 
-    fn read_comment_escape(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("--[[#", 0) {
-            self.advance(5);
-            self.comment_escape = true;
-            return Ok(Some(TokenType::CommentEscape));
+    fn read_comment_escape(&mut self) -> TokenResult {
+        if !self.is_string("--[[#", 0) {
+            return Ok(None);
         }
 
-        Ok(None)
+        self.advance(5);
+        self.comment_escape = true;
+
+        Ok(Some(TokenType::CommentEscape))
     }
 
-    fn read_remaining_comment_escape(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.comment_escape && self.is_value("]]", 0) {
-            self.advance(2);
-            self.comment_escape = false;
-            return Ok(Some(TokenType::CommentEscape));
+    fn read_remaining_comment_escape(&mut self) -> TokenResult {
+        if !self.comment_escape || !self.is_string("]]", 0) {
+            return Ok(None);
         }
 
-        Ok(None)
+        self.advance(2);
+        self.comment_escape = false;
+        Ok(Some(TokenType::CommentEscape))
     }
 
-    fn read_multiline_c_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("/*", 0) {
-            let start = self.position;
-            self.advance(2);
-
-            while !self.the_end() {
-                if self.is_value("*/", 0) {
-                    self.advance(2);
-                    return Ok(Some(TokenType::MultilineComment));
-                }
-
-                self.advance(1);
-            }
-
-            return Err(LexerError {
-                message: "tried to find end of multiline c comment, reached end of code".to_string(),
-                start,
-                stop: self.position,
-            });
+    fn read_multiline_c_comment(&mut self) -> TokenResult {
+        if !self.is_string("/*", 0) {
+            return Ok(None);
         }
 
-        Ok(None)
-    }
+        let start = self.position;
+        self.advance(2);
 
-    fn read_line_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("--", 0) {
-            self.advance(2);
-            while !self.the_end() {
-                if self.is_value("\n", 0) {
-                    break;
-                }
-                self.advance(1);
-            }
-            return Ok(Some(TokenType::LineComment));
-        }
-
-        Ok(None)
-    }
-    fn read_line_c_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("//", 0) {
-            self.advance(2);
-            while !self.the_end() {
-                if self.is_value("\n", 0) {
-                    break;
-                }
-                self.advance(1);
-            }
-            return Ok(Some(TokenType::LineComment));
-        }
-
-        Ok(None)
-    }
-
-    fn read_multiline_comment(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("--[", 0) && (self.is_value("[", 3) || self.is_value("=", 3)) {
-            let start = self.position;
-            self.advance(3);
-
-            while self.is_value("=", 0) {
-                self.advance(1);
-            }
-
-            // if we have an incomplete multiline comment, it's just a single line comment
-            if !self.is_value("[", 0) {
-                self.position = start;
-                return self.read_line_comment();
-            }
-
-            self.advance(1);
-            let pos = self.position;
-
-            let closing = "]".to_string() + &("=").repeat(pos - start - 4) + "]";
-
-            if let Some(pos2) = self.find_nearest(closing.as_str()) {
-                self.position = pos + pos2 + closing.len();
+        while !self.the_end() {
+            if self.is_string("*/", 0) {
+                self.advance(2);
                 return Ok(Some(TokenType::MultilineComment));
             }
 
-            self.position = start + 2;
-
-            return Err(LexerError {
-                message: "unclosed multiline comment".to_string(),
-                start,
-                stop: start + 1,
-            });
+            self.advance(1);
         }
 
-        Ok(None)
+        Err(LexerError {
+            message: "tried to find end of multiline c comment, reached end of code".to_string(),
+            start,
+            stop: self.position,
+        })
     }
 
-    fn read_analyzer_debug_code(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("§", 0) {
-            self.advance(2);
-            while !self.the_end() {
-                if self.is_value("\n", 0) {
-                    break;
-                }
-                self.advance(1);
-            }
-            return Ok(Some(TokenType::AnalyzerDebugCode));
+    fn read_line_comment(&mut self) -> TokenResult {
+        if !self.is_string("--", 0) {
+            return Ok(None);
         }
 
-        Ok(None)
+        self.advance(2);
+        while !self.the_end() {
+            if self.is_string("\n", 0) {
+                break;
+            }
+            self.advance(1);
+        }
+        Ok(Some(TokenType::LineComment))
+    }
+    fn read_line_c_comment(&mut self) -> TokenResult {
+        if !self.is_string("//", 0) {
+            return Ok(None);
+        }
+
+        self.advance(2);
+        while !self.the_end() {
+            if self.is_string("\n", 0) {
+                break;
+            }
+            self.advance(1);
+        }
+
+        Ok(Some(TokenType::LineComment))
     }
 
-    fn read_parser_debug_code(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("£", 0) {
-            self.advance(2);
-            while !self.the_end() {
-                if self.is_value("\n", 0) {
-                    break;
-                }
-                self.advance(1);
-            }
-            return Ok(Some(TokenType::ParserDebugCode));
+    fn read_multiline_comment(&mut self) -> TokenResult {
+        if !self.is_string("--[", 0) || (!self.is_string("[", 3) && !self.is_string("=", 3)) {
+            return Ok(None);
         }
 
-        Ok(None)
+        let start = self.position;
+        self.advance(3);
+
+        while self.is_string("=", 0) {
+            self.advance(1);
+        }
+
+        // if we have an incomplete multiline comment, it's just a single line comment
+        if !self.is_string("[", 0) {
+            self.position = start;
+            return self.read_line_comment();
+        }
+
+        self.advance(1);
+        let pos = self.position;
+
+        let closing = "]".to_string() + &("=").repeat(pos - start - 4) + "]";
+
+        if let Some(pos2) = self.find_nearest(closing.as_str()) {
+            self.position = pos + pos2 + closing.len();
+            return Ok(Some(TokenType::MultilineComment));
+        }
+
+        self.position = start + 2;
+
+        Err(LexerError {
+            message: "unclosed multiline comment".to_string(),
+            start,
+            stop: start + 1,
+        })
+    }
+
+    fn read_analyzer_debug_code(&mut self) -> TokenResult {
+        if !self.is_string("§", 0) {
+            return Ok(None);
+        }
+
+        self.advance(2);
+        while !self.the_end() {
+            if self.is_string("\n", 0) {
+                break;
+            }
+            self.advance(1);
+        }
+
+        Ok(Some(TokenType::AnalyzerDebugCode))
+    }
+
+    fn read_parser_debug_code(&mut self) -> TokenResult {
+        if !self.is_string("£", 0) {
+            return Ok(None);
+        }
+
+        self.advance(2);
+        while !self.the_end() {
+            if self.is_string("\n", 0) {
+                break;
+            }
+            self.advance(1);
+        }
+
+        Ok(Some(TokenType::ParserDebugCode))
     }
 
     fn read_number_exponent(&mut self, what: &str) -> Result<bool, LexerError> {
         // skip the 'e', 'E', 'p' or 'P'
         self.advance(1);
 
-        if self.is_value("+", 0) || self.is_value("-", 0) {
+        if self.is_string("+", 0) || self.is_string("-", 0) {
             self.advance(1);
         } else {
             return Err(LexerError {
@@ -412,16 +419,16 @@ impl Lexer<'_> {
             });
         }
 
-        if !Syntax::is_number(self.get_current_char()) {
+        if !Syntax::is_number(self.char_offset(0)) {
             return Err(LexerError {
-                message: format!("malformed {} expected number, got {}", what, self.get_current_char()),
+                message: format!("malformed {} expected number, got {}", what, self.char_offset(0)),
                 start: self.position - 2,
                 stop: self.position - 1,
             });
         }
 
         while !self.the_end() {
-            if !Syntax::is_number(self.get_current_char()) {
+            if !Syntax::is_number(self.char_offset(0)) {
                 break;
             }
 
@@ -431,139 +438,140 @@ impl Lexer<'_> {
         Ok(true)
     }
 
-    fn read_hex_number(&mut self) -> Result<Option<TokenType>, LexerError> {
+    fn read_hex_number(&mut self) -> TokenResult {
         // 0xABCDEF_1234567890.100p+10
 
-        if self.is_value("0", 0) && (self.is_value("x", 1) || self.is_value("X", 1)) {
-            // skip past 0x
-            self.advance(2);
-
-            while !self.the_end() {
-                if self.is_value("_", 0) {
-                    self.advance(1);
-                }
-
-                if self.is_value(".", 0) && !self.is_value(".", 1) {
-                    self.advance(1);
-                }
-
-                if self.runtime_syntax.is_valid_hex(self.get_current_char()) {
-                    self.advance(1);
-                } else {
-                    if Syntax::is_space(self.get_current_char()) || Syntax::is_symbol(self.get_current_char()) {
-                        break;
-                    }
-
-                    if self.is_value("p", 0) && self.is_value("P", 0) && self.read_number_exponent("pow").is_ok() {
-                        break;
-                    }
-
-                    return Err(LexerError {
-                        message: format!("malformed hex number {} in hex notation", self.get_current_char()),
-                        start: self.position - 1,
-                        stop: self.position,
-                    });
-                }
-            }
-
-            self.read_from_array(self.runtime_syntax.number_annotations());
-
-            return Ok(Some(TokenType::Number));
+        if !self.is_string("0", 0) || (!self.is_string("x", 1) && !self.is_string("X", 1)) {
+            return Ok(None);
         }
 
-        Ok(None)
-    }
+        // skip past 0x
+        self.advance(2);
 
-    fn read_binary_number(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("0", 0) && (self.is_value("b", 1) || self.is_value("B", 1)) {
-            self.advance(2);
-
-            while !self.the_end() {
-                // EXTENSION: allow numbers to be separated by _
-                if self.is_value("_", 0) {
-                    self.advance(1);
-                }
-
-                if self.is_value("1", 0) || self.is_value("0", 0) {
-                    self.advance(1);
-                } else {
-                    if Syntax::is_space(self.get_current_char()) || Syntax::is_symbol(self.get_current_char()) {
-                        break;
-                    }
-
-                    if self.read_from_array(self.runtime_syntax.number_annotations()) {
-                        break;
-                    }
-
-                    return Err(LexerError {
-                        message: "malformed binary number, expected 0, 1 or space".to_string(),
-                        start: self.position - 1,
-                        stop: self.position,
-                    });
-                }
+        while !self.the_end() {
+            if self.is_string("_", 0) {
+                self.advance(1);
             }
 
-            return Ok(Some(TokenType::Number));
+            if self.is_string(".", 0) && !self.is_string(".", 1) {
+                self.advance(1);
+            }
+
+            if self.runtime_syntax.is_valid_hex(self.char_offset(0)) {
+                self.advance(1);
+            } else {
+                if Syntax::is_space(self.char_offset(0)) || Syntax::is_symbol(self.char_offset(0)) {
+                    break;
+                }
+
+                if self.is_string("p", 0) && self.is_string("P", 0) && self.read_number_exponent("pow").is_ok() {
+                    break;
+                }
+
+                return Err(LexerError {
+                    message: format!("malformed hex number {} in hex notation", self.char_offset(0)),
+                    start: self.position - 1,
+                    stop: self.position,
+                });
+            }
         }
 
-        Ok(None)
+        self.read_from_array(self.runtime_syntax.number_annotations());
+
+        Ok(Some(TokenType::Number))
     }
 
-    fn read_decimal_number(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if Syntax::is_number(self.get_current_char())
-            || (self.is_value(".", 0) && Syntax::is_number(self.get_char_offset(1) as char))
+    fn read_binary_number(&mut self) -> TokenResult {
+        if !self.is_string("0", 0) || (!self.is_string("b", 1) && !self.is_string("B", 1)) {
+            return Ok(None);
+        }
+
+        self.advance(2);
+
+        while !self.the_end() {
+            // EXTENSION: allow numbers to be separated by _
+            if self.is_string("_", 0) {
+                self.advance(1);
+            }
+
+            if self.is_string("1", 0) || self.is_string("0", 0) {
+                self.advance(1);
+            } else {
+                if Syntax::is_space(self.char_offset(0)) || Syntax::is_symbol(self.char_offset(0)) {
+                    break;
+                }
+
+                if self.read_from_array(self.runtime_syntax.number_annotations()) {
+                    break;
+                }
+
+                return Err(LexerError {
+                    message: "malformed binary number, expected 0, 1 or space".to_string(),
+                    start: self.position - 1,
+                    stop: self.position,
+                });
+            }
+        }
+
+        Ok(Some(TokenType::Number))
+    }
+
+    fn read_decimal_number(&mut self) -> TokenResult {
+        if !Syntax::is_number(self.char_offset(0))
+            && (!self.is_string(".", 0) || !Syntax::is_number(self.char_offset(1) as char))
         {
-            let mut has_dot = false;
-            if self.is_value(".", 0) {
+            return Ok(None);
+        }
+
+        let mut has_dot = false;
+        if self.is_string(".", 0) {
+            self.advance(1);
+            has_dot = true;
+        }
+
+        while !self.the_end() {
+            if self.is_string("_", 0) {
+                self.advance(1);
+            }
+
+            if !has_dot && self.is_string(".", 0) {
+                if self.is_string(".", 1) {
+                    break;
+                }
                 self.advance(1);
                 has_dot = true;
             }
 
-            while !self.the_end() {
-                if self.is_value("_", 0) {
-                    self.advance(1);
+            if Syntax::is_number(self.char_offset(0)) {
+                self.advance(1);
+            } else {
+                if Syntax::is_space(self.char_offset(0)) || Syntax::is_symbol(self.char_offset(0)) {
+                    break;
                 }
 
-                if !has_dot && self.is_value(".", 0) {
-                    if self.is_value(".", 1) {
-                        break;
+                if self.is_string("e", 0) || self.is_string("E", 0) {
+                    if let Err(err) = self.read_number_exponent("exponent") {
+                        return Err(err);
                     }
-                    self.advance(1);
-                    has_dot = true;
+                    break;
                 }
 
-                if Syntax::is_number(self.get_current_char()) {
-                    self.advance(1);
-                } else {
-                    if Syntax::is_space(self.get_current_char()) || Syntax::is_symbol(self.get_current_char()) {
-                        break;
-                    }
-
-                    if self.is_value("e", 0) || self.is_value("E", 0) {
-                        if let Err(err) = self.read_number_exponent("exponent") {
-                            return Err(err);
-                        }
-                        break;
-                    }
-
-                    if self.read_from_array(self.runtime_syntax.number_annotations()) {
-                        break;
-                    }
-
-                    return Err(LexerError {
-                        message: "malformed decimal number".to_string(),
-                        start: self.position - 1,
-                        stop: self.position,
-                    });
+                if self.read_from_array(self.runtime_syntax.number_annotations()) {
+                    break;
                 }
+
+                return Err(LexerError {
+                    message: "malformed decimal number".to_string(),
+                    start: self.position - 1,
+                    stop: self.position,
+                });
             }
-
-            return Ok(Some(TokenType::Number));
         }
-        Ok(None)
+
+        Ok(Some(TokenType::Number))
     }
 
-    fn read_number(&mut self) -> Result<Option<TokenType>, LexerError> {
+    fn read_number(&mut self) -> TokenResult {
         self.read_hex_number()
             .transpose()
             .or_else(|| self.read_binary_number().transpose())
@@ -571,50 +579,51 @@ impl Lexer<'_> {
             .transpose()
     }
 
-    fn read_multiline_string(&mut self) -> Result<Option<TokenType>, LexerError> {
-        if self.is_value("[", 0) && (self.is_value("[", 1) || self.is_value("=", 1)) {
-            let start = self.position;
-            self.advance(1);
+    fn read_multiline_string(&mut self) -> TokenResult {
+        if !self.is_string("[", 0) || (!self.is_string("[", 1) && !self.is_string("=", 1)) {
+            return Ok(None);
+        }
 
-            if self.is_value("=", 0) {
-                while !self.the_end() {
-                    self.advance(1);
-                    if !self.is_value("=", 0) {
-                        break;
-                    }
+        let start = self.position;
+        self.advance(1);
+
+        if self.is_string("=", 0) {
+            while !self.the_end() {
+                self.advance(1);
+                if !self.is_string("=", 0) {
+                    break;
                 }
             }
+        }
 
-            if !self.is_value("[", 0) {
-                return Err(LexerError {
-                    message: "malformed multiline string, expected =".to_string(),
-                    start,
-                    stop: self.position,
-                });
-            }
-
-            self.advance(1);
-
-            let pos = self.position;
-
-            let closing = "]".to_string() + &("=").repeat(pos - start - 2) + "]";
-
-            if let Some(pos2) = self.find_nearest(closing.as_str()) {
-                self.position = pos + pos2 + closing.len();
-                return Ok(Some(TokenType::MultilineComment));
-            }
-
+        if !self.is_string("[", 0) {
             return Err(LexerError {
-                message: "expected multiline string reached end of code".to_string(),
+                message: "malformed multiline string, expected =".to_string(),
                 start,
                 stop: self.position,
             });
         }
-        Ok(None)
+
+        self.advance(1);
+
+        let pos = self.position;
+
+        let closing = "]".to_string() + &("=").repeat(pos - start - 2) + "]";
+
+        if let Some(pos2) = self.find_nearest(closing.as_str()) {
+            self.position = pos + pos2 + closing.len();
+            return Ok(Some(TokenType::MultilineComment));
+        }
+
+        Err(LexerError {
+            message: "expected multiline string reached end of code".to_string(),
+            start,
+            stop: self.position,
+        })
     }
 
-    fn read_quoted_string(&mut self, quote: char) -> Result<Option<TokenType>, LexerError> {
-        if !self.is_char(quote, 0) {
+    fn read_quoted_string(&mut self, quote: char) -> TokenResult {
+        if self.char_offset(0) != quote {
             return Ok(None);
         }
 
@@ -627,7 +636,7 @@ impl Lexer<'_> {
             if char == '\\' {
                 let char = self.read_char();
 
-                if char == 'z' && !self.is_char(quote, 0) {
+                if char == 'z' && self.char_offset(0) != quote {
                     if let Err(err) = self.read_space() {
                         return Err(err);
                     }
@@ -650,11 +659,11 @@ impl Lexer<'_> {
         })
     }
 
-    fn read_single_quoted_string(&mut self) -> Result<Option<TokenType>, LexerError> {
+    fn read_single_quoted_string(&mut self) -> TokenResult {
         self.read_quoted_string('\'')
     }
 
-    fn read_double_quoted_string(&mut self) -> Result<Option<TokenType>, LexerError> {
+    fn read_double_quoted_string(&mut self) -> TokenResult {
         self.read_quoted_string('"')
     }
 
@@ -662,8 +671,8 @@ impl Lexer<'_> {
         Lexer {
             code,
             position: 0,
-            runtime_syntax: lua_syntax(),
-            typesystem_syntax: lua_typesystem_syntax(),
+            runtime_syntax: runtime_syntax(),
+            typesystem_syntax: typesystem_syntax(),
             comment_escape: false,
         }
     }

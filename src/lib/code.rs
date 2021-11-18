@@ -4,7 +4,7 @@ pub struct Code<'a> {
 }
 
 impl<'a> Code<'a> {
-    pub fn substring(&self, begin: usize, end: usize) -> &str {
+    pub fn get_string(&self, begin: usize, end: usize) -> &str {
         let start = std::cmp::min(begin, self.len());
         let stop = std::cmp::min(end, self.len());
 
