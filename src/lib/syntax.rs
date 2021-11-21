@@ -1,13 +1,12 @@
-#![allow(dead_code)]
 use core::cmp::Reverse;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
-use crate::token::Token;
+use crate::token::{Token, TokenType};
 
-struct BinaryOperatorInfo {
-    left_priority: usize,
-    right_priority: usize,
+pub struct BinaryOperatorInfo {
+    pub left_priority: u16,
+    pub right_priority: u16,
 }
 
 pub struct Syntax {
@@ -45,7 +44,7 @@ impl Syntax {
         self.number_annotations.clone()
     }
 
-    fn add_binary_symbols(symbols: &mut Vec<String>, strings: &[Vec<String>]) {
+    pub fn add_binary_symbols(symbols: &mut Vec<String>, strings: &[Vec<String>]) {
         for string_vec in strings {
             for string in string_vec {
                 if let Some(stripped) = string.strip_prefix('R') {
@@ -90,32 +89,32 @@ impl Syntax {
         self.hex_map.contains(&c.to_string())
     }
 
-    fn is_primary_binary_operator(&self, token: &Token) -> bool {
+    pub fn is_binary_operator(&self, token: &Token) -> bool {
         self.primary_binary_operators_lookup.contains(&token.value)
     }
 
-    fn is_prefix_operator(&self, token: &Token) -> bool {
+    pub fn is_prefix_operator(&self, token: &Token) -> bool {
         self.prefix_operators_lookup.contains(&token.value)
     }
 
-    fn is_postfix_operator(&self, token: &Token) -> bool {
+    pub fn is_postfix_operator(&self, token: &Token) -> bool {
         self.postfix_operators_lookup.contains(&token.value)
     }
 
-    fn is_keyword(&self, token: &Token) -> bool {
+    pub fn is_keyword(&self, token: &Token) -> bool {
         self.keyword_lookup.contains(&token.value)
     }
 
-    fn is_non_standard_keyword(&self, token: &Token) -> bool {
+    pub fn is_non_standard_keyword(&self, token: &Token) -> bool {
         self.non_standard_keyword_lookup.contains(&token.value)
     }
 
-    fn is_keyword_value(&self, token: &Token) -> bool {
+    pub fn is_keyword_value(&self, token: &Token) -> bool {
         self.keyword_values_lookup.contains(&token.value)
     }
 
-    fn get_operator_info(&self, token: &Token) -> &BinaryOperatorInfo {
-        self.binary_operator_info.get(&token.value).unwrap()
+    pub fn get_operator_info(&self, token: &Token) -> Option<&BinaryOperatorInfo> {
+        self.binary_operator_info.get(&token.value)
     }
 
     pub fn add_prefix_operators(&mut self, operators: Vec<String>) {
@@ -133,6 +132,26 @@ impl Syntax {
         Self::add_symbols(&mut self.symbols, &operators);
     }
 
+    pub fn is_token_value(&self, token: &Token) -> bool {
+        if token.kind == TokenType::Number || token.kind == TokenType::String {
+            return true;
+        }
+
+        if self.is_keyword_value(&token) {
+            return true;
+        }
+
+        if self.is_keyword(&token) {
+            return true;
+        }
+
+        if token.kind == TokenType::Letter {
+            return true;
+        }
+
+        false
+    }
+
     pub fn add_binary_operators(&mut self, operators: Vec<Vec<String>>) {
         Self::add_binary_symbols(&mut self.symbols, &operators);
         {
@@ -142,16 +161,16 @@ impl Syntax {
                         self.binary_operator_info.insert(
                             stripped.to_string(),
                             BinaryOperatorInfo {
-                                left_priority: priority + 1,
-                                right_priority: priority,
+                                left_priority: (priority + 1) as u16,
+                                right_priority: priority as u16,
                             },
                         );
                     } else {
                         self.binary_operator_info.insert(
                             token.to_string(),
                             BinaryOperatorInfo {
-                                left_priority: priority,
-                                right_priority: priority,
+                                left_priority: priority as u16,
+                                right_priority: priority as u16,
                             },
                         );
                     }
